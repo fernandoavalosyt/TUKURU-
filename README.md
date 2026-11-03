@@ -58,18 +58,19 @@ Cada tipo admite hasta 8 polígonos. Sin zona `estanteria` no hay detección de 
 
 ### La heurística local
 
-El robo dura 1 a 3 segundos, así que no se mide un estado sostenido sino una **secuencia**:
+El robo dura 1 a 3 segundos, así que no se mide un estado sostenido sino una **secuencia**, que se sigue **mano por mano** (una persona parada junto al estante suele tener una mano en la zona y la otra en la cadera):
 
-1. **Alcance**: una muñeca entra a la zona `estanteria` entre 0,25 y 6 s. Menos es un roce; más es revisar o reponer.
-2. **Ocultamiento**: en los `CONCEAL_WINDOW_SECONDS` siguientes, la mano queda al menos `CONCEAL_MIN_SECONDS` junto a la cadera/bolsillo, al pecho o abdomen, o la muñeca se pierde junto al cuerpo. Una mano en el bolsillo **sin** alcance previo no cuenta.
-3. **Salida**: los pies entran a la zona `salida` con un ocultamiento sin descartar.
-4. **Señales de apoyo**: mirar a los lados repetidamente (giros de cabeza) y repetir ocultamientos en pocos minutos.
+1. **Alcance**: una muñeca entra a la zona `estanteria` entre 0,25 y 6 s, con la persona parada (si camina, solo pasa junto al estante). Menos tiempo es un roce; más es revisar o reponer.
+2. **Ocultamiento**: en los `CONCEAL_WINDOW_SECONDS` siguientes, esa mano queda al menos `CONCEAL_MIN_SECONDS` junto a la cadera/bolsillo/bolso, al pecho o abdomen, o la muñeca se pierde junto al cuerpo; o bien **las dos manos se juntan a la cintura**. Una mano al cuerpo **sin** alcance previo no cuenta.
+3. **Devolución**: si la misma mano vuelve al mismo sitio del estante en `RETURN_WINDOW_SECONDS`, se interpreta como "tomó y lo devolvió" y el ocultamiento se anula.
+4. **Salida**: los pies entran a la zona `salida` con un ocultamiento sin descartar.
+5. **Señales de apoyo**: mirar a los lados repetidamente (giros de cabeza) y repetir ocultamientos en pocos minutos.
 
-Cada evento suma a una puntuación que decae con el tiempo (vida media de unos 2 minutos). Con solo la pose no se ve el producto, así que el objetivo local es decidir **cuándo** consultar a Gemini y dar un respaldo si no está disponible.
+Cada evento suma a una puntuación que decae con el tiempo (vida media de unos 2 minutos). Con solo la pose **no se ve el producto**: "meter algo al bolso" y "mirar el celular con las manos juntas" se parecen mucho. Por eso el objetivo local es decidir **cuándo** consultar a Gemini y dar un respaldo si no está disponible; quien separa a quien robó de quien solo miró es Gemini.
 
 ### Uso de Gemini
 
-Gemini no recibe el video completo. 1,5 s después del ocultamiento se envían hasta `GEMINI_FRAMES` recortes (de los últimos `CLIP_SECONDS` s) de esa persona, con un resumen numérico. Dictamina `ocultamiento`, `normal` o `indeterminado`, e indica la acción (oculta en ropa o bolso, pone en canasta, lleva en mano, devuelve al estante, sin toma). Si descarta el evento con confianza suficiente, ese ocultamiento y todo lo anterior se anulan; un ocultamiento nuevo se vuelve a evaluar. Hay límites de gasto: cooldown por persona, tope por hora y pausa automática ante límite de cuota.
+Gemini no recibe el video completo. 3 s después del ocultamiento se envían hasta `GEMINI_FRAMES` recortes de esa persona (desde `CLIP_SECONDS` s antes del ocultamiento hasta ese instante, ampliados si la persona está lejos), con un resumen numérico. Dictamina `ocultamiento`, `normal` o `indeterminado`, e indica la acción (oculta en ropa o bolso, pone en canasta, lleva en mano, devuelve al estante, sin toma). Si descarta el evento con confianza suficiente, ese ocultamiento y todo lo anterior se anulan; un ocultamiento nuevo se vuelve a evaluar. Hay límites de gasto: cooldown por persona, tope por hora y pausa automática ante límite de cuota.
 
 Si Gemini no está disponible, el sistema sigue con la heurística local, que exige una puntuación más alta para alertar.
 
@@ -125,12 +126,13 @@ Todas las opciones están en `.env.example`. Las principales:
 |---|---|---|
 | `GEMINI_API_KEY` | vacío | Clave de Google AI Studio |
 | `GEMINI_MAX_CALLS_PER_HOUR` | 120 | Tope de consultas por hora |
-| `GEMINI_FRAMES` | 8 | Recortes por consulta |
+| `GEMINI_FRAMES` | 12 | Recortes por consulta |
 | `INFERENCE_FPS` | 8 | Análisis por segundo con personas en escena |
 | `IDLE_FPS` | 2 | Análisis por segundo con la tienda vacía |
 | `MAX_FRAME_SIDE` | 640 | Lado máximo del frame analizado |
 | `CONCEAL_WINDOW_SECONDS` | 8 | Ventana tras el alcance en que la mano al cuerpo cuenta |
 | `CONCEAL_MIN_SECONDS` | 0.6 | Permanencia de la mano junto al cuerpo |
+| `RETURN_WINDOW_SECONDS` | 6 | Si la misma mano vuelve al mismo sitio del estante en este tiempo, se anula |
 | `CHECKOUT_MIN_SECONDS` | 3 | Permanencia en caja para considerar que pagó |
 | `SHADOW_MODE` | false | Registra eventos sin avisar ni enviar webhook |
 | `MAX_CAMERAS` | 3 | Número máximo de cámaras |
@@ -150,6 +152,19 @@ Los valores se validan al iniciar; si alguno es inválido, el programa lista tod
 
 Los umbrales son un punto de partida y **no están calibrados con video real**. Active `SHADOW_MODE=true` unos días: registra eventos con su foto sin avisar a nadie, y permite revisar cuáles fueron falsos positivos (clientes que guardan el celular o la cartera, que ponen algo en su canasta, empleados reponiendo) antes de activar las alertas. Ajuste las zonas, `CONCEAL_*` y los umbrales locales con esos casos. Funciona mejor con la cámara de frente al estante, a la altura del pecho o ligeramente elevada.
 
+### Reproducir un video
+
+Para calibrar sin cámara, `tukuru.replay` pasa un video por la misma heurística (sin Gemini) e imprime la línea de tiempo de eventos:
+
+```
+python -m tukuru.replay video.mp4 --zones zonas.json --out salida.mp4
+```
+
+`zonas.json` usa el mismo formato que el panel (ver `video/zonas_video2.json`). `salida.mp4` muestra zonas, esqueleto y nivel de cada persona. Opciones útiles:
+
+- `--dashboard`: el video sale como el panel web (video, tabla de personas y alertas con evidencia).
+- `--gemini`: cada posible ocultamiento se revisa con Gemini de verdad. **Envía recortes del video a la API** con la clave de `.env`; `--save-clips carpeta` guarda copia de lo enviado y del dictamen.
+
 ## Estructura del proyecto
 
 ```
@@ -160,12 +175,15 @@ tukuru/
   camera.py       Conexión y captura de video
   optimizer.py    Reducción de resolución y mejora con poca luz
   vision.py       YOLO-pose con tracking
-  heuristics.py   Secuencia alcance -> ocultamiento -> salida y puntuación
+  heuristics.py   Secuencia alcance -> ocultamiento -> salida (por mano) y puntuación
+  clips.py        Recortes por persona y clip que se envía a Gemini
+  dashboard.py    Dibuja el panel sobre un video (para replay)
   gemini.py       Cliente de Gemini Vision con control de gasto
   decision.py     Reglas de decisión final
   alerts.py       Alertas, evidencia, registro y modo sombra
   pipeline.py     Flujo completo por cámara
   render.py       Dibujo de zonas, ID, esqueleto y nivel sobre el video
+  replay.py       Reproduce un video con la heurística para calibrar
   app.py          Administración de cámaras en ejecución
   web.py          API y panel web
   static/         Interfaz del panel
@@ -186,4 +204,6 @@ python -m unittest discover -s tests
 - Una persona que sale del encuadre de una cámara y entra a otra tiene un ID nuevo; la secuencia no se sigue entre cámaras. Conviene que la zona `estanteria` y la `salida` queden en la misma cámara, o cubrir el recorrido con zonas por cámara.
 - Una oclusión larga puede cambiar el ID de la persona y reiniciar su secuencia.
 - Las zonas se pegan como JSON; falta un editor visual sobre el video.
+- En cámaras altas o de ojo de pez, la mano sobre el polígono de la estantería no implica contacto: una persona parada frente al estante tiene las manos "dentro" de la zona por perspectiva. Dibuje la zona solo sobre la parte donde la mano llega al alcanzar, no hasta el piso.
+- Si la persona queda tapada por una góndola, el seguimiento se corta y la secuencia en curso se pierde.
 - Los umbrales no están calibrados con video de la tienda real.

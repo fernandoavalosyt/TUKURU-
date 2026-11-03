@@ -1,0 +1,24 @@
+{
+  "contexto": {
+    "estado_local": "ocultamiento",
+    "puntuacion_local": 1.26,
+    "alcances_2min": 4,
+    "ocultamientos": 2,
+    "lugar_ocultamiento": "bolsillo",
+    "giros_de_cabeza": 0,
+    "seg_desde_ocultamiento": 3,
+    "paso_por_caja": false,
+    "salio": false,
+    "visible_seg": 18
+  },
+  "dictamen": {
+    "state": "ocultamiento",
+    "confidence": 0.85,
+    "action": "oculta_en_bolso",
+    "product": "producto pequeño rectangular",
+    "place": "bolso_o_mochila",
+    "looked_around": false,
+    "reasoning": "La persona toma un producto del estante y lo manipula; al alejarse, el objeto desaparece de sus manos mientras estas se posicionan sobre su bolso negro."
+  },
+  "error": null
+}

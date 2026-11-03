@@ -1,0 +1,24 @@
+{
+  "contexto": {
+    "estado_local": "ocultamiento",
+    "puntuacion_local": 0.92,
+    "alcances_2min": 4,
+    "ocultamientos": 1,
+    "lugar_ocultamiento": "pecho_o_abdomen",
+    "giros_de_cabeza": 2,
+    "seg_desde_ocultamiento": 3,
+    "paso_por_caja": false,
+    "salio": false,
+    "visible_seg": 12
+  },
+  "dictamen": {
+    "state": "ocultamiento",
+    "confidence": 0.9,
+    "action": "oculta_en_ropa",
+    "product": "paquete pequeño blanco",
+    "place": "bajo_la_ropa",
+    "looked_around": true,
+    "reasoning": "La persona toma un objeto pequeño y blanco del estante, lo manipula y luego este desaparece de su vista mientras lleva las manos hacia la zona de la cintura. Posteriormente se aleja sin el producto visible en las manos."
+  },
+  "error": null
+}

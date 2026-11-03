@@ -1,0 +1,10 @@
+# Tukuru MVP - una sola aplicacion Python (CPU, sin GPU)
+numpy
+opencv-python-headless
+ultralytics           # YOLO-pose + tracking (instala torch)
+lap                   # ByteTrack
+google-genai          # Gemini Vision
+pydantic
+Flask
+requests
+python-dotenv
