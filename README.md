@@ -94,6 +94,8 @@ Pasar por caja **no anula** un ocultamiento confirmado por Gemini: ocultar un pr
 
 ## Instalación
 
+Guía para trabajar en equipo y problemas frecuentes: [`docs/ENTORNO.md`](docs/ENTORNO.md). Atajo: `python scripts/preparar_entorno.py` (o con `--solo-pruebas` para solo correr las pruebas).
+
 ```
 git clone <url-del-repositorio>
 cd <carpeta>

@@ -1,0 +1,3 @@
+# Solo lo necesario para correr las pruebas unitarias (sin torch ni YOLO).
+numpy
+opencv-python-headless

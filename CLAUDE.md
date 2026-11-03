@@ -25,8 +25,10 @@ Con solo la pose **no se ve el producto**. "Meter algo al bolso" y "mirar el cel
 
 ## Comandos
 
+Entorno nuevo (equipo): `python scripts/preparar_entorno.py --solo-pruebas` (o sin flag para todo). Detalle en `docs/ENTORNO.md`.
+
 ```
-pip install -r requirements.txt
+pip install -r requirements.txt            # requirements-test.txt si solo vas a correr pruebas
 copy .env.example .env                     # (Windows) y completar GEMINI_API_KEY
 python -m tukuru                           # app + panel en http://127.0.0.1:5000
 python -m unittest discover -s tests       # pruebas (unittest, no pytest)
@@ -88,4 +90,5 @@ Flujo y estructuras en `docs/ARQUITECTURA.md`.
 - `README.md`: uso, instalacion, configuracion (orientado al usuario final).
 - `docs/ARQUITECTURA.md`: flujo, estructuras de datos, reglas de decision, API, archivos de datos.
 - `docs/DECISIONES.md`: por que se hizo cada cosa, alternativas descartadas, pendientes.
+- `docs/ENTORNO.md`: preparar el entorno en otra PC, que necesita cada tarea, problemas frecuentes.
 - `docs/PRUEBAS.md`: videos de prueba, verdad de terreno, resultados, como reproducir y calibrar.
