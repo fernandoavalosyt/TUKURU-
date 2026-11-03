@@ -1,0 +1,189 @@
+# Tukuru
+
+Sistema de visión artificial que detecta **robo hormiga** en una tienda de abarrotes: un cliente toma un producto del estante, lo oculta en el bolsillo, bajo la ropa o en un bolso, y sale sin pagarlo. Emite una alerta con evidencia fotográfica para que una persona la revise.
+
+Es una versión de producto mínimo viable: una sola aplicación Python, sin bases de datos ni contenedores, que funciona solo con CPU. Está pensado para 2 cámaras, ampliable a 3 (`MAX_CAMERAS`, máximo 4).
+
+> Tukuru **no acusa**: señala comportamiento sospechoso y guarda evidencia. La confirmación y cualquier acción son siempre de una persona.
+
+## Cómo funciona
+
+```
+Cámara (RTSP / RTSPS / HTTP)
+   |
+   v
+camera.py       Captura con reconexión; siempre entrega el frame más reciente
+   |
+   v
+optimizer.py    Limita los fps, reduce la resolución y mejora la imagen con poca luz
+   |
+   v
+vision.py       YOLOv8n-pose: persona, ID (ByteTrack) y 17 puntos del cuerpo (muñecas, caderas...)
+   |
+   v
+heuristics.py   Secuencia por persona: alcance al estante -> mano al cuerpo -> salida sin caja
+   |
+   v
+gemini.py       Solo ante un posible ocultamiento: clip de ~8 recortes + resumen numérico
+   |
+   v
+decision.py     Combina el estado local y el dictamen de Gemini
+   |
+   v
+alerts.py       Alerta, foto anotada, registro, webhook opcional y reconocimiento
+   |
+   v
+web.py          Panel web en tiempo real
+```
+
+### Zonas de la tienda
+
+Cada cámara puede tener polígonos (coordenadas normalizadas de 0 a 1) de cuatro tipos:
+
+| Zona | Uso |
+|---|---|
+| `estanteria` | Cara del estante. Se mide con las **muñecas** de la persona |
+| `caja` | Zona de pago. Se mide con los **pies**; permanecer `CHECKOUT_MIN_SECONDS` cuenta como "pasó por caja" |
+| `salida` | Puerta. Se mide con los pies |
+| `personal` | Área de empleados. Quien permanece ahí 2 s queda excluido del análisis |
+
+Se pegan como JSON en el campo "Zonas" del panel, por ejemplo:
+
+```
+{"estanteria": [[[0.0, 0.2], [0.4, 0.2], [0.4, 0.8], [0.0, 0.8]]],
+ "salida":     [[[0.8, 0.6], [1.0, 0.6], [1.0, 1.0], [0.8, 1.0]]]}
+```
+
+Cada tipo admite hasta 8 polígonos. Sin zona `estanteria` no hay detección de alcances; sin `salida` el nivel "probable" solo lo alcanza un dictamen de Gemini con salida confirmada.
+
+### La heurística local
+
+El robo dura 1 a 3 segundos, así que no se mide un estado sostenido sino una **secuencia**:
+
+1. **Alcance**: una muñeca entra a la zona `estanteria` entre 0,25 y 6 s. Menos es un roce; más es revisar o reponer.
+2. **Ocultamiento**: en los `CONCEAL_WINDOW_SECONDS` siguientes, la mano queda al menos `CONCEAL_MIN_SECONDS` junto a la cadera/bolsillo, al pecho o abdomen, o la muñeca se pierde junto al cuerpo. Una mano en el bolsillo **sin** alcance previo no cuenta.
+3. **Salida**: los pies entran a la zona `salida` con un ocultamiento sin descartar.
+4. **Señales de apoyo**: mirar a los lados repetidamente (giros de cabeza) y repetir ocultamientos en pocos minutos.
+
+Cada evento suma a una puntuación que decae con el tiempo (vida media de unos 2 minutos). Con solo la pose no se ve el producto, así que el objetivo local es decidir **cuándo** consultar a Gemini y dar un respaldo si no está disponible.
+
+### Uso de Gemini
+
+Gemini no recibe el video completo. 1,5 s después del ocultamiento se envían hasta `GEMINI_FRAMES` recortes (de los últimos `CLIP_SECONDS` s) de esa persona, con un resumen numérico. Dictamina `ocultamiento`, `normal` o `indeterminado`, e indica la acción (oculta en ropa o bolso, pone en canasta, lleva en mano, devuelve al estante, sin toma). Si descarta el evento con confianza suficiente, ese ocultamiento y todo lo anterior se anulan; un ocultamiento nuevo se vuelve a evaluar. Hay límites de gasto: cooldown por persona, tope por hora y pausa automática ante límite de cuota.
+
+Si Gemini no está disponible, el sistema sigue con la heurística local, que exige una puntuación más alta para alertar.
+
+## Niveles
+
+| Nivel | Significado | Quién lo decide | ¿Alerta? |
+|---|---|---|---|
+| `observacion` | Comportamiento inusual o verificación en curso | Heurística local | No (solo panel) |
+| `posible_ocultamiento` | Tomó algo y lo ocultó | Gemini con confianza ≥ `MIN_CONF_CONFIRM`, o puntuación local ≥ `LOCAL_POSSIBLE_SCORE` sin Gemini | Sí |
+| `probable_sustraccion` | Ocultó y salió | Lo anterior más cruce de `salida`. Sin Gemini, además, no haber pasado por caja y puntuación ≥ `LOCAL_PROBABLE_SCORE` | Sí |
+| `sistema` | Cámara sin señal por más de 60 s | Automático | Sí |
+
+Pasar por caja **no anula** un ocultamiento confirmado por Gemini: ocultar un producto y pagar otros es justo el patrón típico. Solo evita el nivel "probable" cuando la decisión es únicamente local.
+
+## Requisitos
+
+- Python 3.10 o superior.
+- Equipo con CPU convencional; no requiere GPU.
+- Cámara IP con acceso RTSP o HTTP, o un archivo de video para pruebas.
+- Clave de API de Google AI Studio para activar Gemini (opcional pero recomendada).
+
+## Instalación
+
+```
+git clone <url-del-repositorio>
+cd <carpeta>
+pip install -r requirements.txt
+copy .env.example .env      (Windows)
+cp .env.example .env        (Linux / macOS)
+```
+
+Los pesos de YOLO se descargan automáticamente en `models/` la primera vez.
+
+## Uso
+
+```
+python -m tukuru
+```
+
+Abra el panel: http://127.0.0.1:5000
+
+### Agregar una cámara
+
+Desde el panel, en "Agregar / editar cámara", complete IP, usuario, contraseña y marca, pegue las zonas y use "Probar conexión" antes de guardar. También puede definirla en `.env` (`CAMERA_1_URL`, `CAMERA_1_USER`, ...; ver `.env.example`).
+
+Para probar sin cámara: `CAMERA_1_PROTOCOL=file` y `CAMERA_1_PATH=C:\ruta\al\video.mp4`.
+
+## Configuración
+
+Todas las opciones están en `.env.example`. Las principales:
+
+| Variable | Valor por defecto | Descripción |
+|---|---|---|
+| `GEMINI_API_KEY` | vacío | Clave de Google AI Studio |
+| `GEMINI_MAX_CALLS_PER_HOUR` | 120 | Tope de consultas por hora |
+| `GEMINI_FRAMES` | 8 | Recortes por consulta |
+| `INFERENCE_FPS` | 8 | Análisis por segundo con personas en escena |
+| `IDLE_FPS` | 2 | Análisis por segundo con la tienda vacía |
+| `MAX_FRAME_SIDE` | 640 | Lado máximo del frame analizado |
+| `CONCEAL_WINDOW_SECONDS` | 8 | Ventana tras el alcance en que la mano al cuerpo cuenta |
+| `CONCEAL_MIN_SECONDS` | 0.6 | Permanencia de la mano junto al cuerpo |
+| `CHECKOUT_MIN_SECONDS` | 3 | Permanencia en caja para considerar que pagó |
+| `SHADOW_MODE` | false | Registra eventos sin avisar ni enviar webhook |
+| `MAX_CAMERAS` | 3 | Número máximo de cámaras |
+| `ALERT_WEBHOOK_URL` | vacío | URL que recibe cada alerta como JSON |
+
+Los valores se validan al iniciar; si alguno es inválido, el programa lista todos los errores juntos y no arranca.
+
+## Seguridad y privacidad
+
+- El panel escucha solo en `127.0.0.1` por defecto. `WEB_HOST=0.0.0.0` exige definir `DASHBOARD_USER` y `DASHBOARD_PASSWORD`. El panel no cifra el tráfico: use una red interna o un proxy con HTTPS.
+- Las contraseñas de las cámaras no se devuelven por la API ni se escriben en los registros.
+- `data/cameras.json` guarda las contraseñas en texto plano. Proteja la carpeta `data/`.
+- Las imágenes de clientes se envían a Gemini. Confirme los requisitos legales de videovigilancia y datos personales de su país (aviso en el local, retención, acceso) antes de usarlo en producción.
+- No suba `.env`, `data/` ni `models/` al repositorio; ya están en `.gitignore`.
+
+## Calibración
+
+Los umbrales son un punto de partida y **no están calibrados con video real**. Active `SHADOW_MODE=true` unos días: registra eventos con su foto sin avisar a nadie, y permite revisar cuáles fueron falsos positivos (clientes que guardan el celular o la cartera, que ponen algo en su canasta, empleados reponiendo) antes de activar las alertas. Ajuste las zonas, `CONCEAL_*` y los umbrales locales con esos casos. Funciona mejor con la cámara de frente al estante, a la altura del pecho o ligeramente elevada.
+
+## Estructura del proyecto
+
+```
+tukuru/
+  __main__.py     Punto de entrada
+  config.py       Configuración, validación, cámaras y zonas
+  zones.py        Polígonos de estantería, caja, salida y personal
+  camera.py       Conexión y captura de video
+  optimizer.py    Reducción de resolución y mejora con poca luz
+  vision.py       YOLO-pose con tracking
+  heuristics.py   Secuencia alcance -> ocultamiento -> salida y puntuación
+  gemini.py       Cliente de Gemini Vision con control de gasto
+  decision.py     Reglas de decisión final
+  alerts.py       Alertas, evidencia, registro y modo sombra
+  pipeline.py     Flujo completo por cámara
+  render.py       Dibujo de zonas, ID, esqueleto y nivel sobre el video
+  app.py          Administración de cámaras en ejecución
+  web.py          API y panel web
+  static/         Interfaz del panel
+tests/            Pruebas unitarias
+data/             Cámaras, alertas y evidencia (se crea al ejecutar)
+models/           Pesos descargados (se crea al ejecutar)
+```
+
+## Pruebas
+
+```
+python -m unittest discover -s tests
+```
+
+## Limitaciones conocidas
+
+- Con solo la pose no se ve el producto: el filtro de falsos positivos (producto en canasta, objetos propios) depende de Gemini. Sin Gemini habrá más falsos positivos.
+- Una persona que sale del encuadre de una cámara y entra a otra tiene un ID nuevo; la secuencia no se sigue entre cámaras. Conviene que la zona `estanteria` y la `salida` queden en la misma cámara, o cubrir el recorrido con zonas por cámara.
+- Una oclusión larga puede cambiar el ID de la persona y reiniciar su secuencia.
+- Las zonas se pegan como JSON; falta un editor visual sobre el video.
+- Los umbrales no están calibrados con video de la tienda real.
