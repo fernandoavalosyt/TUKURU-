@@ -52,10 +52,10 @@ def decide(ts: TrackState, now: float, s: Settings) -> Tuple[str, str, str]:
 
     place = PLACE_TEXT.get(ts.conceal_place, "el cuerpo")
     if exited and ts.paid_at is None and ts.score >= s.local_probable_score:
-        return "probable_sustraccion", "local", f"Tomo del estante, llevo la mano a {place} y salio sin pasar por caja"
+        return "probable_sustraccion", "local", f"Tomo del estante, llevo la mano hacia {place} y salio sin pasar por caja"
     if ts.score >= s.local_possible_score:
         times = "1 vez" if len(active) == 1 else f"{len(active)} veces"
-        return "posible_ocultamiento", "local", f"Tomo del estante y llevo la mano a {place} ({times})"
+        return "posible_ocultamiento", "local", f"Tomo del estante y llevo la mano hacia {place} ({times})"
     return "observacion", "local", "Posible ocultamiento sin confirmar"
 
 
