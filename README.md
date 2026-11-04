@@ -138,6 +138,7 @@ Todas las opciones están en `.env.example`. Las principales:
 | `CHECKOUT_MIN_SECONDS` | 3 | Permanencia en caja para considerar que pagó |
 | `SHADOW_MODE` | false | Registra eventos sin avisar ni enviar webhook |
 | `MAX_CAMERAS` | 3 | Número máximo de cámaras |
+| `CREDENTIALS_STORE` | auto | Dónde se guardan las contraseñas de las cámaras: `auto` (llavero del sistema si existe, si no `data/cameras.json`), `keyring` (exige llavero) o `file` |
 | `ALERT_WEBHOOK_URL` | vacío | URL que recibe cada alerta como JSON |
 
 Los valores se validan al iniciar; si alguno es inválido, el programa lista todos los errores juntos y no arranca.
@@ -146,7 +147,7 @@ Los valores se validan al iniciar; si alguno es inválido, el programa lista tod
 
 - El panel escucha solo en `127.0.0.1` por defecto. `WEB_HOST=0.0.0.0` exige definir `DASHBOARD_USER` y `DASHBOARD_PASSWORD`. El panel no cifra el tráfico: use una red interna o un proxy con HTTPS.
 - Las contraseñas de las cámaras no se devuelven por la API ni se escriben en los registros.
-- `data/cameras.json` guarda las contraseñas en texto plano. Proteja la carpeta `data/`.
+- Las cámaras se agregan desde el panel (no hace falta `.env`). Sus contraseñas van al llavero del sistema (Administrador de credenciales de Windows, Keychain, Secret Service) y `data/cameras.json` no las contiene. Sin llavero (servidor sin escritorio) quedan en ese archivo con permisos 600: proteja `data/`. Un `cameras.json` antiguo con contraseñas en texto plano se migra solo al arrancar.
 - Las imágenes de clientes se envían a Gemini. Confirme los requisitos legales de videovigilancia y datos personales de su país (aviso en el local, retención, acceso) antes de usarlo en producción.
 - No suba `.env`, `data/` ni `models/` al repositorio; ya están en `.gitignore`.
 

@@ -95,12 +95,15 @@ def create_web(app_core: Tukuru) -> Flask:
     # ---- camaras (credenciales) ---------------------------------------------
     @web.get("/api/cameras")
     def cameras():
-        return jsonify([c.public() for c in app_core.store.list()])
+        return jsonify([{**c.public(), "password_in": app_core.store.where_password(c.id)}
+                        for c in app_core.store.list()])
 
     def _parse(payload):
         if not isinstance(payload, dict):
             raise ValueError("payload invalido")
         previous = app_core.store.get(str(payload.get("id") or ""))
+        if previous and "zones" not in payload:       # un cliente que no menciona zonas no las borra
+            payload = {**payload, "zones": previous.zones}
         return validate_camera(payload, existing_password=previous.password if previous else "")
 
     @web.post("/api/cameras/test")
@@ -119,6 +122,14 @@ def create_web(app_core: Tukuru) -> Flask:
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
         return jsonify(saved.public()), 201
+
+    @web.post("/api/cameras/<cam_id>/enabled")
+    def camera_enabled(cam_id: str):
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or not isinstance(payload.get("enabled"), bool):
+            return jsonify(error="enabled debe ser true o false"), 400
+        cam = app_core.set_enabled(cam_id, payload["enabled"])
+        return (jsonify(cam.public()) if cam else (jsonify(error="no existe"), 404))
 
     @web.delete("/api/cameras/<cam_id>")
     def camera_delete(cam_id: str):

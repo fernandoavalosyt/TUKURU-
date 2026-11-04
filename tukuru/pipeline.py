@@ -37,7 +37,8 @@ class CameraPipeline(threading.Thread):
         self.cfg, self.s, self.judge, self.alerts = cfg, settings, judge, alerts
         self.stream = CameraStream(cfg)
         self.optimizer = FrameOptimizer(settings.max_side)
-        self.tracker = PoseTracker(model_path, settings.device, settings.yolo_conf)
+        self.model_path = model_path
+        self.tracker: Optional[PoseTracker] = None     # se carga en run(): tarda y no debe frenar la web
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
         self._tracks: Dict[int, TrackState] = {}
@@ -73,6 +74,12 @@ class CameraPipeline(threading.Thread):
     # ---- bucle -----------------------------------------------------------
     def run(self) -> None:
         self.stream.start()
+        try:
+            self.tracker = PoseTracker(self.model_path, self.s.device, self.s.yolo_conf)
+        except Exception:  # noqa: BLE001
+            logger.exception("[%s] no se pudo cargar el modelo", self.cfg.id)
+            self.stream.stop()
+            return
         gate = FpsGate(self.s.inference_fps)
         while not self._stop_event.is_set():
             try:

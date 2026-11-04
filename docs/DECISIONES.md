@@ -18,6 +18,7 @@ Registro de **por que** el sistema es como es. Si cambias una regla que afecte a
 12. **Modo sombra (`SHADOW_MODE`)** para calibrar en tienda real antes de avisar a nadie.
 13. **`tukuru.replay`** para calibrar con video sin camara, con panel dibujado (`dashboard.py`) y el `AlertManager` real en carpeta temporal.
 14. **Salida del sistema = "comportamiento sospechoso".** Nunca "robo". La confirmacion es humana.
+15. **Contrasenas de camaras en el llavero del sistema, no en `.env` ni en texto plano.** Se agregan desde el panel y el archivo `data/cameras.json` solo guarda la configuracion. `keyring` es opcional: sin llavero (servidor sin escritorio) se cae al archivo con chmod 600 y se avisa en el log; si el llavero falla al guardar, la contrasena NO se pierde (queda en el archivo). Alternativa descartada: cifrar el archivo con una clave guardada en `data/` (la clave junto al candado no protege). En Windows `chmod` no restringe nada: ahi el llavero es la proteccion real. Tambien: la URL completa pegada en el panel manda sobre el protocolo del formulario, y el modelo YOLO de cada camara se carga en su hilo para no frenar la peticion web.
 
 ## Alternativas probadas o descartadas
 

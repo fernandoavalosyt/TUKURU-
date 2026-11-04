@@ -7,8 +7,11 @@ import threading
 import time
 from typing import Any, Dict, List, Optional
 
+from dataclasses import replace
+
 from .alerts import AlertManager
-from .config import CameraConfig, CameraStore, Settings
+from .config import CameraConfig, CameraStore, ConfigError, Settings
+from .credentials import CredentialError, open_credentials
 from .gemini import GeminiJudge
 from .pipeline import CameraPipeline
 from .vision import ensure_model
@@ -20,7 +23,11 @@ class Tukuru:
     def __init__(self, settings: Settings) -> None:
         self.s = settings
         settings.data_dir.mkdir(parents=True, exist_ok=True)
-        self.store = CameraStore(settings.data_dir / "cameras.json", settings.max_cameras)
+        try:
+            credentials = open_credentials(settings.credentials_store)
+        except CredentialError as exc:
+            raise ConfigError(str(exc)) from exc
+        self.store = CameraStore(settings.data_dir / "cameras.json", settings.max_cameras, credentials)
         self.alerts = AlertManager(settings)
         self.judge = GeminiJudge(settings)
         self.model_path = ensure_model(settings.models_dir, settings.yolo_model)
@@ -59,6 +66,10 @@ class Tukuru:
             self._start_pipeline(cam)
         return cam
 
+    def set_enabled(self, cam_id: str, enabled: bool) -> Optional[CameraConfig]:
+        cam = self.store.get(cam_id)
+        return self.save_camera(replace(cam, enabled=enabled)) if cam else None
+
     def delete_camera(self, cam_id: str) -> bool:
         removed = self.store.remove(cam_id)
         self._stop_pipeline(cam_id)
@@ -85,4 +96,4 @@ class Tukuru:
                    for c in self.store.list() if c.id not in running]
         return {"uptime_seconds": round(time.time() - self.started), "cameras": cameras + stopped,
                 "gemini": self.judge.health(), "active_alerts": self.alerts.active_count(),
-                "max_cameras": self.s.max_cameras}
+                "max_cameras": self.s.max_cameras, "credentials_store": self.store.mode}

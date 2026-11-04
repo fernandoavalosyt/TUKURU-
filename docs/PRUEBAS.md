@@ -6,7 +6,7 @@
 python -m unittest discover -s tests
 ```
 
-37 pruebas, sin red ni modelos. Cubren validacion de camaras/zonas/ajustes y escenas sinteticas de puntos del cuerpo (`Scene` en `tests/test_tukuru.py`: persona de pie 640x360, alcance en `REACH`, bolsillo en `POCKET`, zonas `ZONES`). Una prueba por regla: alcance, roce, manos al bolsillo sin alcance, ventana vencida, muneca perdida, mirada lateral, personal, mano por mano, manos juntas, devolucion (mismo sitio / otro sitio / fuera de ventana), caminar, decision con/sin Gemini, pasar por caja, repeticion de alertas.
+47 pruebas (37 de deteccion en `tests/test_tukuru.py`, 10 de camaras/credenciales en `tests/test_camaras.py` con un llavero simulado), sin red ni modelos. Cubren validacion de camaras/zonas/ajustes y escenas sinteticas de puntos del cuerpo (`Scene` en `tests/test_tukuru.py`: persona de pie 640x360, alcance en `REACH`, bolsillo en `POCKET`, zonas `ZONES`). Una prueba por regla: alcance, roce, manos al bolsillo sin alcance, ventana vencida, muneca perdida, mirada lateral, personal, mano por mano, manos juntas, devolucion (mismo sitio / otro sitio / fuera de ventana), caminar, decision con/sin Gemini, pasar por caja, repeticion de alertas.
 
 ## Videos de prueba (carpeta `video/`)
 

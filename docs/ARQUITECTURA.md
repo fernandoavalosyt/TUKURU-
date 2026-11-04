@@ -67,7 +67,7 @@ Emite al **escalar de nivel**, o ante un nuevo ocultamiento si pasaron `ALERT_RE
 ## Configuracion y datos
 
 - `Settings.from_env()` valida rangos y reporta todos los errores juntos. Variables: ver `.env.example` (fuente de verdad) y README.
-- Camaras: `data/cameras.json` (contrasenas en texto plano; se intenta chmod 600). Se siembran desde `CAMERA_n_*` del `.env` solo si el archivo no existe. Cada camara lleva `zones`.
+- Camaras: `data/cameras.json`. Las contrasenas van al llavero del sistema (`credentials.py`, paquete `keyring`, servicio `tukuru`, usuario `camara:<id>`) y el archivo queda con `password: ""`; sin llavero quedan en el archivo (chmod 600). `CREDENTIALS_STORE=auto|keyring|file`. Un archivo antiguo en texto plano se migra al cargar. Se siembran desde `CAMERA_n_*` del `.env` solo si el archivo no existe. Cada camara lleva `zones`.
 - Zonas: `{"estanteria": [poligono,...], "caja": [...], "salida": [...], "personal": [...]}`; cada poligono 3-16 puntos `[x, y]` normalizados; hasta 8 por tipo. `estanteria` se mide con **munecas**; `caja`, `salida`, `personal` con los **pies** (centro inferior del bbox).
 
 ## API web (`web.py`)

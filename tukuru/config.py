@@ -13,11 +13,12 @@ import logging
 import os
 import re
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote, unquote, urlsplit
 
+from .credentials import MODES as CREDENTIAL_MODES, CredentialError, KeyringCredentials, open_credentials
 from .zones import ZONE_KINDS
 
 logger = logging.getLogger("tukuru.config")
@@ -115,6 +116,7 @@ class Settings:
     web_user: Optional[str]
     web_password: Optional[str]
     max_cameras: int
+    credentials_store: str
     log_level: str
 
     @staticmethod
@@ -170,6 +172,7 @@ class Settings:
             web_user=web_user,
             web_password=web_password,
             max_cameras=r.num("MAX_CAMERAS", 3, 1, 4, int),
+            credentials_store=r.choice("CREDENTIALS_STORE", "auto", CREDENTIAL_MODES),
             log_level=r.choice("LOG_LEVEL", "info", ("debug", "info", "warning", "error")),
         )
         if settings.local_probable_score <= settings.local_possible_score:
@@ -317,7 +320,8 @@ def validate_camera(data: Dict[str, Any], *, allow_local: bool = False, existing
     url = _clean_text(data.get("url"), "url", 512)
     if url:
         parts = urlsplit(url)
-        data.setdefault("protocol", parts.scheme)
+        if parts.scheme:
+            data["protocol"] = parts.scheme
         try:
             port = parts.port
         except ValueError:
@@ -380,27 +384,66 @@ def validate_camera(data: Dict[str, Any], *, allow_local: bool = False, existing
 class CameraStore:
     """Persistencia de camaras en data/cameras.json (escritura atomica).
 
-    Las contrasenas se guardan en texto plano en ese archivo: protegerlo con
-    permisos del sistema operativo (se intenta chmod 600)."""
+    Las contrasenas van al llavero del sistema si hay uno (`credentials`); entonces el
+    archivo no las contiene. Sin llavero quedan en el archivo (se intenta chmod 600).
+    Un archivo antiguo con contrasenas en texto plano se migra solo al cargarlo."""
 
-    def __init__(self, path: Path, max_cameras: int) -> None:
+    def __init__(self, path: Path, max_cameras: int, credentials: Optional[KeyringCredentials] = None) -> None:
         self.path = path
         self.max_cameras = max_cameras
+        self.credentials = credentials
         self._lock = threading.Lock()
         self._cameras: Dict[str, CameraConfig] = {}
+        self._in_keyring: set = set()          # ids cuya contrasena esta en el llavero y no en el archivo
         self._load()
 
+    @property
+    def mode(self) -> str:
+        return "keyring" if self.credentials else "file"
+
     def _load(self) -> None:
-        if self.path.is_file():
-            try:
-                raw = json.loads(self.path.read_text(encoding="utf-8"))
-                for item in raw.get("cameras", []):
-                    cam = validate_camera(item, allow_local=True)
-                    self._cameras[cam.id] = cam
-            except (OSError, ValueError, AttributeError) as exc:
-                raise ConfigError(f"No se pudo leer {self.path}: {exc}") from exc
-        elif self._seed_from_env():
+        if not self.path.is_file():
+            if self._seed_from_env():
+                self._store_secrets()
+                self._save()
+            return
+        try:
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+            cams = [validate_camera(item, allow_local=True) for item in raw.get("cameras", [])]
+        except (OSError, ValueError, AttributeError) as exc:
+            raise ConfigError(f"No se pudo leer {self.path}: {exc}") from exc
+        migrated = False
+        for cam in cams:
+            if self.credentials and cam.is_network and cam.user:
+                if cam.password:                       # texto plano heredado: pasa al llavero
+                    migrated |= self._to_keyring(cam)
+                else:
+                    try:
+                        cam = replace(cam, password=self.credentials.get(cam.id) or "")
+                        self._in_keyring.add(cam.id)
+                    except CredentialError as exc:
+                        logger.warning("[%s] %s", cam.id, exc)
+            self._cameras[cam.id] = cam
+        if migrated:
+            logger.info("Contrasenas de camaras movidas de %s al llavero del sistema.", self.path.name)
             self._save()
+
+    def _to_keyring(self, cam: CameraConfig) -> bool:
+        """Guarda la contrasena en el llavero. False si no se pudo (queda en el archivo)."""
+        try:
+            self.credentials.set(cam.id, cam.password)
+        except CredentialError as exc:
+            logger.warning("%s; queda en el archivo", exc)
+            self._in_keyring.discard(cam.id)
+            return False
+        self._in_keyring.add(cam.id)
+        return True
+
+    def _store_secrets(self) -> None:
+        if self.credentials:
+            for cam in self._cameras.values():
+                if cam.password:
+                    self._to_keyring(cam)
 
     def _seed_from_env(self) -> bool:
         seeded = False
@@ -421,8 +464,13 @@ class CameraStore:
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"cameras": [c.to_json() for c in self._cameras.values()]}, indent=2),
-                       encoding="utf-8")
+        cameras = []
+        for cam in self._cameras.values():
+            item = cam.to_json()
+            if cam.id in self._in_keyring:
+                item["password"] = ""
+            cameras.append(item)
+        tmp.write_text(json.dumps({"cameras": cameras}, indent=2), encoding="utf-8")
         try:
             os.chmod(tmp, 0o600)
         except OSError:
@@ -437,15 +485,29 @@ class CameraStore:
         with self._lock:
             return self._cameras.get(cam_id)
 
+    def where_password(self, cam_id: str) -> str:
+        """"keyring", "file" o "" (la camara no tiene contrasena)."""
+        with self._lock:
+            cam = self._cameras.get(cam_id)
+            if cam is None or not cam.password:
+                return ""
+            return "keyring" if cam_id in self._in_keyring else "file"
+
     def upsert(self, cam: CameraConfig) -> CameraConfig:
         with self._lock:
             if not cam.id:
                 n = 1
                 while f"CAM-{n:02d}" in self._cameras:
                     n += 1
-                cam = CameraConfig(**{**cam.__dict__, "id": f"CAM-{n:02d}"})
+                cam = replace(cam, id=f"CAM-{n:02d}")
             if cam.id not in self._cameras and len(self._cameras) >= self.max_cameras:
                 raise ValueError(f"maximo {self.max_cameras} camaras (MAX_CAMERAS)")
+            if self.credentials:
+                if cam.password:
+                    self._to_keyring(cam)
+                else:
+                    self.credentials.delete(cam.id)
+                    self._in_keyring.discard(cam.id)
             self._cameras[cam.id] = cam
             self._save()
             return cam
@@ -454,5 +516,8 @@ class CameraStore:
         with self._lock:
             if self._cameras.pop(cam_id, None) is None:
                 return False
+            if self.credentials:
+                self.credentials.delete(cam_id)
+            self._in_keyring.discard(cam_id)
             self._save()
             return True

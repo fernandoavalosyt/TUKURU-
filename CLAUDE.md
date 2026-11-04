@@ -44,6 +44,7 @@ python -m tukuru.replay ... --gemini --save-clips CARPETA    # revision REAL con
 |---|---|
 | `__main__.py`, `app.py` | Arranque; `Tukuru` administra pipelines de camara en caliente |
 | `config.py` | `Settings.from_env()` (validado, errores acumulados), `CameraConfig`, `validate_camera`, zonas, `CameraStore` (`data/cameras.json`) |
+| `credentials.py` | Contrasenas de camaras en el llavero del sistema (`keyring`, opcional) |
 | `zones.py` | `ZoneSet`: poligonos normalizados 0-1 por tipo (`estanteria`, `caja`, `salida`, `personal`) |
 | `camera.py`, `optimizer.py` | Captura RTSP/HTTP con reconexion; reduce a <=640 px, limita fps, modo nocturno |
 | `vision.py` | `PoseTracker` (YOLO-pose + ByteTrack). Indices COCO de munecas/caderas |

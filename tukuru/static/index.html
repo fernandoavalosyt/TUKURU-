@@ -49,8 +49,9 @@
   <section class="card"><h2>Personas detectadas</h2><div id="people" class="empty">Sin personas en escena.</div></section>
   <section class="card"><h2>Alertas</h2><div id="alerts" class="empty">Sin alertas.</div></section>
   <section class="card wide">
-    <h2>Agregar / editar camara</h2>
+    <h2 id="formTitle">Agregar camara</h2>
     <form id="camForm" autocomplete="off">
+      <label style="grid-column:1/-1">URL completa (opcional, rellena el resto): rtsp://usuario:contrasena@192.168.1.64:554/ruta<input name="url" maxlength="512" placeholder="rtsp://admin:clave@192.168.1.64:554/Streaming/Channels/102"></label>
       <label>ID (opcional)<input name="id" maxlength="32" placeholder="CAM-01"></label>
       <label>Nombre<input name="name" maxlength="60" placeholder="Pasillo 1 - Bebidas"></label>
       <label>Protocolo<select name="protocol"><option>rtsp</option><option>rtsps</option><option>http</option><option>https</option></select></label>
@@ -58,15 +59,18 @@
       <label>IP / host<input name="host" placeholder="192.168.1.64"></label>
       <label>Puerto<input name="port" type="number" min="1" max="65535" placeholder="554"></label>
       <label>Usuario<input name="user" maxlength="64"></label>
-      <label>Contrasena<input name="password" type="password" maxlength="128" placeholder="(sin cambios si se edita)"></label>
+      <label>Contrasena<input name="password" type="password" maxlength="128" autocomplete="new-password" placeholder="(sin cambios si se edita)"></label>
+      <label style="flex-direction:row;align-items:center;gap:6px"><input name="enabled" type="checkbox" checked>Habilitada</label>
       <label>Ruta (opcional)<input name="path" maxlength="256" placeholder="/Streaming/Channels/102"></label>
       <label style="grid-column:1/-1">Zonas (JSON opcional: estanteria, caja, salida, personal; coordenadas 0-1)<textarea name="zones" rows="3" placeholder='{"estanteria":[[[0.0,0.2],[0.4,0.2],[0.4,0.8],[0.0,0.8]]],"salida":[[[0.8,0.6],[1,0.6],[1,1],[0.8,1]]]}'></textarea></label>
     </form>
     <div class="row" style="margin-top:10px">
       <button id="testBtn" type="button" class="sec">Probar conexion</button>
       <button id="saveBtn" type="button">Guardar y conectar</button>
+      <button id="clearBtn" type="button" class="sec">Nueva / limpiar</button>
       <span class="msg" id="camMsg"></span>
     </div>
+    <div class="meta" id="credInfo" style="margin-top:8px"></div>
     <div id="camList" style="margin-top:12px"></div>
   </section>
 </main>
@@ -160,38 +164,71 @@ async function refresh() {
     const ids = new Set(alerts.map(a => a.id));
     if (seenAlerts) alerts.filter(a => !seenAlerts.has(a.id) && !a.shadow).forEach(a => beep(a.level === "probable_sustraccion"));
     seenAlerts = ids;
-    renderCamList(st.cameras.map(c => c.camera));
+    renderCamList(st.cameras, st.credentials_store);
   } catch (e) { $("alertsPill").textContent = "Sin conexion con el servidor"; $("alertsPill").className = "pill bad"; }
 }
 
+const PORTS = { rtsp: 554, rtsps: 322, http: 80, https: 443 };
+const form = () => $("camForm");
+const setPortHint = () => { form().elements.port.placeholder = PORTS[form().elements.protocol.value] || ""; };
+form().elements.protocol.onchange = setPortHint; setPortHint();
+
 function formData() {
-  const f = Object.fromEntries(new FormData($("camForm")).entries());
-  if (!f.port) delete f.port;
-  if (f.zones && f.zones.trim()) { try { f.zones = JSON.parse(f.zones); } catch { throw new Error("Zonas: JSON invalido"); } } else delete f.zones;
+  const fe = form().elements, f = {};
+  for (const k of ["id","name","protocol","brand","host","port","user","password","path","url"]) { const v = fe[k].value.trim(); if (v) f[k] = v; }
+  f.enabled = fe.enabled.checked;
+  const z = fe.zones.value.trim();
+  if (z) { try { f.zones = JSON.parse(z); } catch { throw new Error("Zonas: JSON invalido"); } } else f.zones = {};
   return f;
 }
-async function submit(url, okText) {
-  const msg = $("camMsg"); msg.className = "msg"; msg.textContent = "Procesando...";
-  try { const r = await api(url, { method: "POST", body: JSON.stringify(formData()) }); msg.className = "msg ok"; msg.textContent = r.message || okText; $("camForm").elements.id.readOnly = false; refresh(); }
-  catch (e) { msg.className = "msg bad"; msg.textContent = e.message; }
+function resetForm() {
+  form().reset(); form().elements.id.readOnly = false; form().elements.enabled.checked = true;
+  $("formTitle").textContent = "Agregar camara"; setPortHint();
 }
-$("testBtn").onclick = async () => {
-  const msg = $("camMsg"); msg.className = "msg"; msg.textContent = "Probando conexion...";
-  try { const r = await api("/api/cameras/test", { method: "POST", body: JSON.stringify(formData()) }); msg.className = "msg " + (r.ok ? "ok" : "bad"); msg.textContent = r.message; }
-  catch (e) { msg.className = "msg bad"; msg.textContent = e.message; }
-};
-$("saveBtn").onclick = () => submit("/api/cameras", "Camara guardada");
+function say(cls, text) { const m = $("camMsg"); m.className = "msg " + cls; m.textContent = text; }
+async function run(btn, working, job) {
+  const buttons = [$("testBtn"), $("saveBtn")]; buttons.forEach(b => b.disabled = true); say("", working);
+  try { await job(); } catch (e) { say("bad", e.message); } finally { buttons.forEach(b => b.disabled = false); }
+}
+$("testBtn").onclick = () => run($("testBtn"), "Probando conexion (hasta 12 s)...", async () => {
+  const r = await api("/api/cameras/test", { method: "POST", body: JSON.stringify(formData()) });
+  say(r.ok ? "ok" : "bad", r.message);
+});
+$("saveBtn").onclick = () => run($("saveBtn"), "Guardando...", async () => {
+  const saved = await api("/api/cameras", { method: "POST", body: JSON.stringify(formData()) });
+  resetForm(); say("ok", `Camara ${saved.name} (${saved.id}) guardada. Conectando...`); refresh();
+});
+$("clearBtn").onclick = () => { resetForm(); say("", ""); };
+
+function editCamera(c) {
+  const fe = form().elements;
+  for (const k of ["id","name","protocol","brand","host","user","path"]) fe[k].value = c[k] ?? "";
+  fe.port.value = c.port || ""; fe.url.value = ""; fe.password.value = "";
+  fe.enabled.checked = c.enabled; fe.id.readOnly = true;
+  fe.zones.value = c.zones ? JSON.stringify(c.zones) : "";
+  $("formTitle").textContent = "Editando " + c.id; setPortHint(); say("", "");
+  form().scrollIntoView({ behavior: "smooth" });
+}
 
 let lastCamKey = "";
-function renderCamList(list) {
-  const key = JSON.stringify(list); if (key === lastCamKey) return; lastCamKey = key;
+const STATE = { connected: "conectada", reconnecting: "SIN SENAL", connecting: "conectando", disabled: "deshabilitada" };
+function renderCamList(list, creds) {
+  $("credInfo").textContent = creds === "keyring" ? "Las contrasenas se guardan cifradas en el llavero del sistema (no en data/cameras.json)."
+    : "Sin llavero en este equipo: las contrasenas quedan en data/cameras.json. Proteja la carpeta data/.";
+  const key = JSON.stringify(list.map(c => [c.camera, c.stream && c.stream.state, c.stream && c.stream.last_error]));
+  if (key === lastCamKey) return; lastCamKey = key;
   const box = $("camList"); box.replaceChildren();
-  for (const c of list) {
+  for (const item of list) {
+    const c = item.camera, st = item.stream || {};
     const row = el("div", "row"); row.style.marginBottom = "6px";
-    row.append(el("span", "pill", c.id), el("span", "", c.name + " - " + c.url));
-    const edit = el("button", "sec", "Editar"); edit.onclick = () => { const f = $("camForm"); const fe = f.elements; for (const k of ["id","name","protocol","brand","host","port","user","path"]) if (fe[k]) fe[k].value = c[k] ?? ""; fe.id.readOnly = true; fe.password.value = ""; fe.zones.value = c.zones ? JSON.stringify(c.zones) : ""; window.scrollTo(0, document.body.scrollHeight); };
-    const del = el("button", "del", "Eliminar"); del.onclick = async () => { if (confirm("Eliminar " + c.name + "?")) { await api("/api/cameras/" + encodeURIComponent(c.id), { method: "DELETE" }); refresh(); } };
-    row.append(edit, del); box.append(row);
+    const state = el("span", "pill " + (st.state === "connected" ? "ok" : st.state === "disabled" ? "" : "bad"), STATE[st.state] || st.state);
+    row.append(el("span", "pill", c.id), state, el("span", "", c.name + " - " + c.url));
+    if (st.last_error && st.state !== "connected") row.append(el("span", "meta", st.last_error));
+    const edit = el("button", "sec", "Editar"); edit.onclick = () => editCamera(c);
+    const toggle = el("button", "sec", c.enabled ? "Deshabilitar" : "Habilitar");
+    toggle.onclick = async () => { toggle.disabled = true; try { await api("/api/cameras/" + encodeURIComponent(c.id) + "/enabled", { method: "POST", body: JSON.stringify({ enabled: !c.enabled }) }); } catch (e) { say("bad", e.message); } refresh(); };
+    const del = el("button", "del", "Eliminar"); del.onclick = async () => { if (confirm("Eliminar " + c.name + "? Tambien se borra su contrasena guardada.")) { try { await api("/api/cameras/" + encodeURIComponent(c.id), { method: "DELETE" }); } catch (e) { say("bad", e.message); } refresh(); } };
+    row.append(edit, toggle, del); box.append(row);
   }
 }
 refresh(); setInterval(refresh, 2000);

@@ -8,3 +8,4 @@ pydantic
 Flask
 requests
 python-dotenv
+keyring               # contrasenas de camaras en el llavero del sistema (opcional: sin el, van a data/cameras.json)
