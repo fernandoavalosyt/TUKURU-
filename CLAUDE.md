@@ -54,7 +54,7 @@ python -m tukuru.replay ... --gemini --save-clips CARPETA    # revision REAL con
 | `clips.py` | `store_crop` / `select_clip`: recortes por persona y clip que se envia a Gemini |
 | `alerts.py` | `AlertManager`: deduplicacion, evidencia, JSONL, webhook, modo sombra |
 | `pipeline.py` | Hilo por camara que orquesta todo |
-| `render.py`, `dashboard.py` | Overlay del video / panel dibujado en OpenCV (solo para replay) |
+| `render.py`, `dashboard.py` | Overlay del video en vivo y en replay (zonas, estado por mano, secuencia alcance>oculta>caja>salida) / panel dibujado en OpenCV (solo replay) |
 | `replay.py` | Reproduccion de video con la heuristica (+ Gemini opcional) |
 | `web.py`, `static/index.html` | API Flask y panel |
 

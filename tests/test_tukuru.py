@@ -139,6 +139,43 @@ class Scene:
         self.play(pocket, POCKET)
 
 
+class PanelStage(Scene, unittest.TestCase):
+    """Lo que el panel y el overlay muestran de la secuencia de sustraccion."""
+
+    def test_nothing_before_any_reach(self):
+        self.play(3)
+        self.assertEqual(self.ts.hand_states(self.t), ["", ""])
+        self.assertFalse(any(self.ts.stage(self.t).values()))
+
+    def test_hand_in_shelf_is_reach_then_watched(self):
+        self.play(1.0, REACH)
+        self.assertEqual(self.ts.hand_states(self.t - 0.2), ["alcance", ""])
+        self.play(0.6)                                   # saco la mano: sigue vigilada hasta que expire la ventana
+        self.assertEqual(self.ts.hand_states(self.t), ["vigilada", ""])
+        self.assertTrue(self.ts.stage(self.t)["alcance"])
+        self.assertFalse(self.ts.stage(self.t)["ocultamiento"])
+
+    def test_stage_follows_the_sequence(self):
+        self.steal()
+        self.assertTrue(self.ts.stage(self.t)["ocultamiento"])
+        self.assertFalse(self.ts.stage(self.t)["salida"])
+        self.play(1.5, bbox=EXIT_BBOX)
+        self.assertTrue(self.ts.stage(self.t)["salida"])
+        self.assertFalse(self.ts.stage(self.t)["caja"])
+
+
+class Overlay(Scene, unittest.TestCase):
+    def test_draw_tracks_runs_with_zones_and_sequence(self):
+        from tukuru.render import draw_tracks
+        self.steal()
+        self.ts.verdict = {"state": "probable_sustraccion", "confidence": 0.9}
+        frame = np.zeros((360, 640, 3), np.uint8)
+        out = draw_tracks(frame, [self.ts], "Cam", 8.0, self.zones)
+        self.assertEqual(out.shape, frame.shape)
+        self.assertGreater(int(out.sum()), 0)              # dibujo algo
+        self.assertEqual(int(frame.sum()), 0)              # y no modifico el original
+
+
 class Sequence(Scene, unittest.TestCase):
     def test_hands_at_sides_never_suspect(self):
         self.play(60)

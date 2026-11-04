@@ -62,7 +62,7 @@ def _card(img: np.ndarray, x: int, y: int, w: int, h: int, title: str) -> None:
 
 def _people_table(img: np.ndarray, x: int, y: int, w: int, tracks: Iterable[TrackState], now: float) -> None:
     cols = [("ID", 0), ("Estado", 38), ("Punt.", 238), ("Alcan.", 286), ("Ocult.", 340), ("Lugar", 394),
-            ("Giros", 514), ("Caja", 562), ("Gemini", 606)]
+            ("Mirada", 514), ("Caja", 562), ("Gemini", 606)]
     for name, dx in cols:
         _text(img, name, (x + dx, y), MUTED, 0.4)
     cv2.line(img, (x, y + 6), (x + w, y + 6), LINE, 1)

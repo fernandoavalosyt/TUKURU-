@@ -62,7 +62,7 @@ class CameraPipeline(threading.Thread):
             people = [{
                 "id": ts.track_id, "level": ts.level, "source": ts.level_source, "staff": ts.is_staff,
                 "reason": ts.level_reason, "seconds_visible": round(now - ts.first_seen),
-                "verdict": ts.verdict, **ts.summary(now),
+                "verdict": ts.verdict, "etapa": ts.stage(now), "manos": ts.hand_states(now), **ts.summary(now),
             } for ts in sorted(self._tracks.values(), key=lambda t: t.track_id)]
         return {"camera": self.cfg.public(), "stream": self.stream.status(), "fps": round(self._fps_out, 1),
                 "dark_mode": self.optimizer.is_dark, "people": people}

@@ -47,6 +47,7 @@ STAFF_SECONDS = 2.0           # s en zona de personal para considerarlo empleado
 SCORE_TAU = 180.0             # s de decaimiento de cada evento
 EVENT_KEEP = 900.0
 OBSERVE_SCORE = 0.20
+STAGE_REACH_SECONDS = 15.0    # un alcance cuenta como etapa vigente (panel/overlay) durante este tiempo
 
 # Pesos de cada evento en la puntuacion.
 W_REACH = 0.08
@@ -251,6 +252,27 @@ class TrackState:
             "seg_desde_ocultamiento": round(now - active[-1]) if active else None,
             "paso_por_caja": self.paid_at is not None,
             "salio": self.exit_time is not None,
+        }
+
+    def hand_states(self, now: float) -> List[str]:
+        """Por mano (izquierda, derecha): "alcance" (en el estante), "vigilada" (tomo algo y aun puede ocultarlo) o ""."""
+        states = []
+        for hand in self.hands:
+            if hand.reach_start is not None and now - hand.reach_last <= HAND_GRACE:
+                states.append("alcance")
+            elif now <= hand.armed_until:
+                states.append("vigilada")
+            else:
+                states.append("")
+        return states
+
+    def stage(self, now: float) -> Dict[str, bool]:
+        """Etapas de la secuencia de sustraccion que lleva esta persona (solo para mostrar)."""
+        return {
+            "alcance": any(self.hand_states(now)) or any(now - t <= STAGE_REACH_SECONDS for t in self.reaches),
+            "ocultamiento": bool(self.active_conceals()),
+            "caja": self.paid_at is not None,
+            "salida": self.exit_time is not None,
         }
 
 
