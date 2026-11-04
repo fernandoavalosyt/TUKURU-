@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Tukuru - Robo hormiga</title>
+<title>Tukuru | Monitoreo</title>
 <style>
   :root { --bg:#0f1419; --card:#1a2129; --line:#2a3440; --txt:#e6edf3; --mut:#8b98a5; --ok:#3fb950; --warn:#f0a020; --bad:#f85149; --acc:#4493f8; }
   * { box-sizing: border-box; }
@@ -35,45 +35,143 @@
   .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
   .msg { font-size:13px; } .msg.ok { color:var(--ok); } .msg.bad { color:var(--bad); }
   .empty { color:var(--mut); }
+  /* Distribucion: monitoreo primero, administracion en una vista independiente. */
+  :root { --bg:#10151c; --card:#181f28; --line:#2b3542; --mut:#a0adbc; --acc:#5b9bf5; }
+  body { font-size:14px; }
+  header { justify-content:space-between; padding:16px 28px; background:#141b24; }
+  .brand { display:flex; align-items:center; gap:12px; }
+  .brand-mark { display:grid; place-items:center; width:36px; height:36px; border-radius:10px; background:#223957; color:#9ec5ff; font-weight:750; }
+  .brand p { margin:0; font-size:12px; color:var(--mut); }
+  h1 { font-size:19px; letter-spacing:-.5px; } h2 { font-size:16px; margin:0; }
+  nav { display:flex; gap:6px; padding:0 28px; border-bottom:1px solid var(--line); background:#141b24; }
+  .tab { background:transparent; border-radius:0; border-bottom:2px solid transparent; padding:13px 16px; color:var(--mut); }
+  .tab[aria-pressed=true] { color:var(--txt); border-bottom-color:var(--acc); }
+  main { display:block; max-width:1600px; margin:auto; padding:24px 28px; }
+  [hidden] { display:none !important; }
+  .page-heading { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:18px; }
+  .page-heading p,.section-heading p { margin:4px 0 0; color:var(--mut); font-size:13px; }
+  .summary-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-bottom:20px; }
+  .summary-card { padding:15px 18px; background:var(--card); border:1px solid var(--line); border-radius:10px; }
+  .summary-card span { color:var(--mut); font-size:12px; display:block; }
+  .summary-card strong { font-size:25px; font-weight:650; display:block; margin-top:3px; }
+  .monitor-grid { display:grid; grid-template-columns:minmax(0,1fr) 370px; gap:18px; align-items:start; }
+  .monitor-primary { display:grid; gap:18px; min-width:0; }
+  .card { padding:18px; border-radius:10px; }
+  .section-heading { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:16px; }
+  .camera-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+  .camera-grid.single { grid-template-columns:1fr; }
+  .camera-box { overflow:hidden; border:1px solid var(--line); border-radius:8px; background:#10151c; }
+  .camera-title { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:10px 12px; }
+  .camera-title strong { font-size:13px; }
+  .camera-detail { color:var(--mut); padding:8px 12px; font-size:12px; }
+  img.video { border-radius:0; aspect-ratio:16/9; object-fit:contain; }
+  .video-offline { min-height:150px; display:grid; place-items:center; color:var(--mut); background:#0c1016; }
+  .pill { display:inline-block; white-space:normal; }
+  #gem { max-width:310px; }
+  .connection { font-size:12px; color:var(--mut); }
+  .empty { padding:28px 12px; text-align:center; border:1px dashed var(--line); border-radius:8px; }
+  .alert-toolbar { display:flex; gap:8px; margin-bottom:14px; }
+  .alert-toolbar select { flex:1; min-width:0; }
+  .alert-list { max-height:760px; overflow:auto; }
+  .alert { display:block; padding:14px; margin-bottom:10px; background:#141b23; }
+  .alert.acked { opacity:1; }
+  .alert.acked .alert-heading { color:var(--mut); }
+  .alert-heading { font-size:12px; font-weight:650; }
+  .alert-content { display:flex; gap:10px; margin:10px 0; align-items:start; }
+  .alert .meta,.meta { font-size:12px; color:var(--mut); overflow-wrap:anywhere; }
+  .alert p { margin:0 0 6px; font-size:13px; }
+  .evidence-button { background:transparent; padding:0; flex-shrink:0; border-radius:5px; }
+  .alert img { display:block; width:78px; height:65px; }
+  .alert-actions { display:flex; gap:8px; justify-content:flex-end; align-items:center; }
+  button { min-height:36px; border-radius:6px; font-size:13px; font-weight:550; }
+  button.del { background:transparent; color:#ffaaa5; border:1px solid #653b3e; }
+  button:disabled { opacity:.5; cursor:wait; }
+  button:hover:not(:disabled) { filter:brightness(1.15); }
+  button:focus-visible,summary:focus-visible,a:focus-visible { outline:2px solid var(--acc); outline-offset:3px; }
+  input,select,textarea { min-height:36px; border-radius:6px; }
+  input:focus,select:focus,textarea:focus { outline:2px solid var(--acc); outline-offset:1px; }
+  .table-wrap { overflow-x:auto; }
+  th,td { padding:11px 8px; vertical-align:top; }
+  th { font-size:12px; white-space:nowrap; }
+  td { font-size:13px; }
+  .person-details { margin-top:5px; font-size:12px; color:var(--mut); }
+  summary { cursor:pointer; }
+  .person-details p { margin:7px 0; max-width:400px; }
+  .config-grid { display:grid; grid-template-columns:minmax(0,1.25fr) minmax(0,1fr); gap:18px; align-items:start; }
+  form { grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+  .span-all { grid-column:1/-1; }
+  .form-section { grid-column:1/-1; margin:6px 0 0; font-size:12px; color:var(--mut); text-transform:uppercase; letter-spacing:.8px; }
+  .check-label { flex-direction:row; align-items:center; gap:8px; }
+  .check-label input { min-height:auto; }
+  .advanced { border-top:1px solid var(--line); padding-top:14px; }
+  .advanced-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin-top:14px; }
+  .form-actions { margin-top:20px; padding-top:16px; border-top:1px solid var(--line); }
+  #camMsg { display:block; margin-top:12px; }
+  .camera-list-item { padding:14px 0; border-bottom:1px solid var(--line); }
+  .camera-list-item:first-child { padding-top:0; }
+  .camera-list-item .row { margin-top:10px; }
+  .camera-list-item .meta { margin:7px 0; }
+  #credInfo { margin-top:16px; }
+  .notice { padding:10px 14px; margin-bottom:16px; border:1px solid #68432e; border-radius:7px; color:#ffd0a6; }
+  dialog { width:min(1000px,94vw); max-height:92vh; padding:18px; border:1px solid var(--line); border-radius:10px; background:var(--card); color:var(--txt); }
+  dialog::backdrop { background:#000b; }
+  dialog img { display:block; width:100%; max-height:74vh; object-fit:contain; margin-top:14px; }
+  @media(min-width:1450px) { .monitor-grid { grid-template-columns:minmax(0,1fr) 400px; } }
+  @media(max-width:1050px) { .monitor-grid,.config-grid { grid-template-columns:1fr; } .alert-list { max-height:550px; } }
+  @media(max-width:620px) { header { padding:14px 16px; } nav { padding:0 16px; } main { padding:18px 12px; } .camera-grid,form,.advanced-fields { grid-template-columns:1fr; } .summary-grid { gap:8px; } .summary-card { padding:12px 10px; } .summary-card strong { font-size:22px; } .card { padding:14px; } #gem { max-width:100%; } .header-actions { width:100%; } }
 </style>
 </head>
 <body>
 <header>
-  <h1>Tukuru</h1>
-  <span class="pill" id="gem">Gemini: ...</span>
-  <span class="pill" id="alertsPill">Alertas: 0</span>
-  <button class="sec" id="soundBtn">Activar sonido de alerta</button>
+  <div class="brand"><span class="brand-mark" aria-hidden="true">T</span><div><h1>Tukuru</h1><p>Monitoreo de tienda</p></div></div>
+  <div class="row header-actions"><span class="pill" id="gem">Gemini: comprobando...</span><button class="sec" id="soundBtn" aria-pressed="false">Activar sonido</button></div>
 </header>
+<nav aria-label="Vistas del dashboard"><button class="tab" id="monitorTab" aria-pressed="true">Monitoreo</button><button class="tab" id="configTab" aria-pressed="false">Configuracion</button></nav>
 <main>
-  <section class="card wide" id="videos"><h2>Camaras</h2><div class="empty" id="noCams">Sin camaras. Agregue una abajo.</div></section>
-  <section class="card"><h2>Personas detectadas</h2><div id="people" class="empty">Sin personas en escena.</div></section>
-  <section class="card"><h2>Alertas</h2><div id="alerts" class="empty">Sin alertas.</div></section>
-  <section class="card wide">
+  <div id="serverNotice" class="notice" role="status" hidden></div>
+  <div id="monitorView">
+    <div class="page-heading"><div><h2>Vista general</h2><p>Camaras, personas y alertas en un solo lugar.</p></div><span id="lastUpdate" class="connection">Conectando con el servidor...</span></div>
+    <div class="summary-grid">
+      <div class="summary-card"><span>Camaras conectadas</span><strong id="cameraCount">--</strong></div>
+      <div class="summary-card"><span>Personas en escena</span><strong id="peopleCount">--</strong></div>
+      <div class="summary-card"><span>Alertas pendientes</span><strong id="alertsPill">--</strong></div>
+    </div>
+    <div class="monitor-grid">
+      <div class="monitor-primary">
+        <section class="card"><div class="section-heading"><h2>Camaras en vivo</h2><button class="sec" id="addCameraBtn">Administrar camaras</button></div><div class="empty" id="noCams">Aun no hay camaras. Agrega la primera en Configuracion.</div><div class="camera-grid" id="videos"></div></section>
+        <section class="card"><div class="section-heading"><div><h2>Personas en escena</h2><p>Despliega el detalle para consultar los indicadores.</p></div></div><div id="people" class="empty">Sin personas en escena.</div></section>
+      </div>
+      <section class="card"><div class="section-heading"><h2>Alertas</h2><span id="alertCount" class="pill">0</span></div><div class="alert-toolbar"><select id="alertFilter" aria-label="Filtrar alertas"><option value="all">Todas las alertas</option><option value="pending">Pendientes</option><option value="acked">Reconocidas</option></select><button class="sec" id="clearAlertsBtn" hidden>Limpiar vista</button></div><p id="alertFeedback" class="msg" role="status"></p><div class="alert-list"><div id="alerts" class="empty">Sin alertas.</div></div></section>
+    </div>
+  </div>
+  <div id="configView" hidden>
+    <div class="page-heading"><div><h2>Configuracion de camaras</h2><p>Agrega, conecta y administra las camaras de la tienda.</p></div></div>
+    <div class="config-grid"><section class="card">
     <h2 id="formTitle">Agregar camara</h2>
     <form id="camForm" autocomplete="off">
-      <label style="grid-column:1/-1">URL completa (opcional, rellena el resto): rtsp://usuario:contrasena@192.168.1.64:554/ruta<input name="url" maxlength="512" placeholder="rtsp://admin:clave@192.168.1.64:554/Streaming/Channels/102"></label>
-      <label>ID (opcional)<input name="id" maxlength="32" placeholder="CAM-01"></label>
+      <p class="form-section">Conexion</p>
+      <label class="span-all">URL del stream (opcional)<input name="url" maxlength="512" placeholder="rtsp://192.168.1.64:554/Streaming/Channels/102"><span>Usa una URL completa o llena los datos de conexion.</span></label>
       <label>Nombre<input name="name" maxlength="60" placeholder="Pasillo 1 - Bebidas"></label>
+      <label>ID (opcional)<input name="id" maxlength="32" placeholder="CAM-01"></label>
       <label>Protocolo<select name="protocol"><option>rtsp</option><option>rtsps</option><option>http</option><option>https</option></select></label>
       <label>Marca (ruta del stream)<select name="brand"></select></label>
       <label>IP / host<input name="host" placeholder="192.168.1.64"></label>
       <label>Puerto<input name="port" type="number" min="1" max="65535" placeholder="554"></label>
       <label>Usuario<input name="user" maxlength="64"></label>
       <label>Contrasena<input name="password" type="password" maxlength="128" autocomplete="new-password" placeholder="(sin cambios si se edita)"></label>
-      <label style="flex-direction:row;align-items:center;gap:6px"><input name="enabled" type="checkbox" checked>Habilitada</label>
-      <label>Ruta (opcional)<input name="path" maxlength="256" placeholder="/Streaming/Channels/102"></label>
-      <label style="grid-column:1/-1">Zonas (JSON opcional: estanteria, caja, salida, personal; coordenadas 0-1)<textarea name="zones" rows="3" placeholder='{"estanteria":[[[0.0,0.2],[0.4,0.2],[0.4,0.8],[0.0,0.8]]],"salida":[[[0.8,0.6],[1,0.6],[1,1],[0.8,1]]]}'></textarea></label>
+      <label class="check-label span-all"><input name="enabled" type="checkbox" checked>Camara habilitada</label>
+      <details class="advanced span-all" id="advancedFields"><summary>Ruta y zonas de deteccion</summary><div class="advanced-fields"><label class="span-all">Ruta personalizada (opcional)<input name="path" maxlength="256" placeholder="/Streaming/Channels/102"></label><label class="span-all">Zonas en JSON<textarea name="zones" rows="4" placeholder='{"estanteria":[[[0.0,0.2],[0.4,0.2],[0.4,0.8],[0.0,0.8]]]}'></textarea><span>Tipos: estanteria, caja, salida y personal. Coordenadas de 0 a 1.</span></label></div></details>
     </form>
-    <div class="row" style="margin-top:10px">
+    <div class="row form-actions">
       <button id="testBtn" type="button" class="sec">Probar conexion</button>
       <button id="saveBtn" type="button">Guardar y conectar</button>
-      <button id="clearBtn" type="button" class="sec">Nueva / limpiar</button>
-      <span class="msg" id="camMsg"></span>
+      <button id="clearBtn" type="button" class="sec">Nueva camara</button>
     </div>
-    <div class="meta" id="credInfo" style="margin-top:8px"></div>
-    <div id="camList" style="margin-top:12px"></div>
-  </section>
+    <span class="msg" id="camMsg" role="status"></span>
+  </section><section class="card"><div class="section-heading"><h2>Camaras configuradas</h2></div><div id="camList"></div><div class="meta" id="credInfo"></div></section></div>
+  </div>
 </main>
+<dialog id="evidenceDialog" aria-labelledby="evidenceTitle"><div class="section-heading"><h2 id="evidenceTitle">Evidencia de la alerta</h2><button class="sec" id="closeEvidence">Cerrar</button></div><img id="evidenceImage" alt="Imagen de evidencia de la alerta seleccionada"></dialog>
 <script>
 const $ = (id) => document.getElementById(id);
 const api = async (url, opts = {}) => {
@@ -83,12 +181,36 @@ const api = async (url, opts = {}) => {
   return data;
 };
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+const sequence = (p) => {
+  const e = p.etapa || {}, steps = [];
+  if (e.alcance) steps.push("alcance");
+  if (e.ocultamiento) steps.push("oculta" + (p.lugar_ocultamiento ? " (" + p.lugar_ocultamiento.replace(/_/g, " ") + ")" : ""));
+  if (e.caja) steps.push("paso caja");
+  if (e.salida) steps.push("salio");
+  return steps.length ? steps.join(" > ") : "-";
+};
 const LEVEL = { ok: "normal", observacion: "observacion", posible_ocultamiento: "POSIBLE OCULTAMIENTO", probable_sustraccion: "PROBABLE SUSTRACCION" };
+function showView(config) {
+  $("monitorView").hidden = config; $("configView").hidden = !config;
+  $("monitorTab").setAttribute("aria-pressed", String(!config));
+  $("configTab").setAttribute("aria-pressed", String(config));
+}
+$("monitorTab").onclick = () => showView(false);
+$("configTab").onclick = $("addCameraBtn").onclick = () => showView(true);
+$("closeEvidence").onclick = () => $("evidenceDialog").close();
+$("evidenceDialog").onclick = e => { if (e.target === $("evidenceDialog")) $("evidenceDialog").close(); };
 
 ["generico","hikvision","dahua","tapo","reolink","uniview","axis"].forEach(b => { const o = el("option", "", b); o.value = b; document.querySelector("[name=brand]").append(o); });
 
 let soundOn = false, ctx = null, seenAlerts = null;
-$("soundBtn").onclick = () => { soundOn = !soundOn; if (soundOn && !ctx) ctx = new (window.AudioContext || window.webkitAudioContext)(); $("soundBtn").textContent = soundOn ? "Sonido activado" : "Activar sonido de alerta"; };
+$("soundBtn").onclick = async () => {
+  try {
+    if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+    await ctx.resume(); soundOn = !soundOn;
+    $("soundBtn").textContent = soundOn ? "Sonido activado" : "Activar sonido";
+    $("soundBtn").setAttribute("aria-pressed", String(soundOn));
+  } catch { $("soundBtn").textContent = "Sonido no disponible"; }
+};
 function beep(critical) {
   if (!soundOn || !ctx) return;
   [0, 0.35, 0.7].forEach(t => { const o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = critical ? 960 : 640; g.gain.value = 0.15; o.connect(g); g.connect(ctx.destination); o.start(ctx.currentTime + t); o.stop(ctx.currentTime + t + 0.25); });
@@ -102,70 +224,139 @@ function renderCameras(list) {
     const id = c.camera.id;
     let box = cams[id];
     if (!box) {
-      box = cams[id] = { root: el("div"), title: el("div", "meta"), img: el("img", "video") };
-      box.root.style.cssText = "display:inline-block;width:calc(50% - 8px);min-width:300px;vertical-align:top;margin:0 8px 8px 0";
-      box.root.append(box.title, box.img); grid.append(box.root);
-      box.img.src = "/stream/" + encodeURIComponent(id);
+      box = cams[id] = { root: el("article", "camera-box"), title: el("strong"), status: el("span", "pill"),
+        img: el("img", "video"), detail: el("div", "camera-detail"), offline: el("div", "video-offline") };
+      const heading = el("div", "camera-title"); heading.append(box.title, box.status);
+      box.root.append(heading, box.img, box.offline, box.detail); grid.append(box.root);
+      box.img.onerror = () => { box.img.hidden = true; box.offline.hidden = false; box.offline.textContent = "Imagen no disponible"; box.failed = true; };
     }
     const st = c.stream || {};
     const state = { connected: "conectada", reconnecting: "SIN SENAL", connecting: "conectando", disabled: "deshabilitada" }[st.state] || st.state;
-    box.title.textContent = `${c.camera.name} (${id}) - ${state} - ${c.fps || 0} fps analisis` + (c.dark_mode ? " - modo nocturno" : "");
-    box.title.style.color = st.state === "connected" ? "var(--mut)" : "var(--bad)";
+    box.title.textContent = c.camera.name; box.img.alt = "Video en vivo de " + c.camera.name;
+    box.status.textContent = state || "sin estado";
+    box.status.className = "pill " + (st.state === "connected" ? "ok" : st.state === "disabled" ? "" : "warn");
+    box.detail.textContent = `${id} · ${c.fps || 0} fps` + (c.dark_mode ? " · modo nocturno" : "");
+    const enabled = st.state !== "disabled";
+    if (enabled && (!box.img.getAttribute("src") || box.failed)) {
+      box.failed = false; box.img.src = "/stream/" + encodeURIComponent(id) + "?v=" + Date.now();
+    }
+    if (!enabled) box.img.removeAttribute("src");
+    box.img.hidden = !enabled; box.offline.hidden = enabled;
+    box.offline.textContent = "Camara deshabilitada";
   }
   for (const id of Object.keys(cams)) if (!list.find(c => c.camera.id === id)) { cams[id].root.remove(); delete cams[id]; }
+  grid.classList.toggle("single", list.length === 1);
 }
 
+const expandedPeople = new Set();
 function renderPeople(list) {
   const rows = [];
-  for (const c of list) for (const p of c.people) rows.push([c.camera.name, p]);
+  for (const c of list) for (const p of c.people || []) rows.push([c.camera, p]);
   const box = $("people"); box.replaceChildren();
   if (!rows.length) { box.className = "empty"; box.textContent = "Sin personas en escena."; return; }
   box.className = "";
-  const t = el("table"), head = el("tr");
-  ["Camara","ID","Estado","Punt.","Alcances","Ocultam.","Lugar","Giros cab.","Caja","Gemini"].forEach(h => head.append(el("th", "", h)));
-  t.append(head);
+  const t = el("table"), head = el("tr"), thead = el("thead"), tbody = el("tbody");
+  ["Persona","Camara","Estado","Secuencia y detalle"].forEach(h => { const th = el("th", "", h); th.scope = "col"; head.append(th); });
+  thead.append(head); t.append(thead, tbody);
   for (const [cam, p] of rows) {
     const tr = el("tr");
     const verdict = p.verdict ? `${p.verdict.state} - ${p.verdict.action} (${Math.round(p.verdict.confidence * 100)}%)` : "-";
-    [cam, p.id, p.staff ? "personal" : (LEVEL[p.level] || p.level), p.puntuacion_local, p.alcances_2min, p.ocultamientos, p.lugar_ocultamiento || "-", p.giros_de_cabeza, p.paso_por_caja ? "si" : "no", verdict].forEach((v, i) => {
+    ["ID " + p.id, cam.name, p.staff ? "personal" : (LEVEL[p.level] || p.level)].forEach((v, i) => {
       const td = el("td", i === 2 ? "lvl-" + p.level : "", String(v)); tr.append(td);
     });
-    t.append(tr);
+    const detailCell = el("td"), details = el("details", "person-details"), key = cam.id + ":" + p.id;
+    detailCell.append(el("div", "", p.staff ? "Excluido del analisis" : sequence(p)));
+    details.open = expandedPeople.has(key);
+    details.append(el("summary", "", "Ver indicadores"));
+    details.append(el("p", "", `Puntuacion: ${p.puntuacion_local ?? "-"} · Alcances: ${p.alcances_2min ?? 0} · Ocultamientos: ${p.ocultamientos ?? 0}`));
+    details.append(el("p", "", `Lugar: ${p.lugar_ocultamiento || "-"} · Miradas: ${p.giros_de_cabeza ?? 0} · Paso por caja: ${p.paso_por_caja ? "si" : "no"}`));
+    details.append(el("p", "", "Gemini: " + verdict));
+    if (p.reason) details.append(el("p", "", p.reason));
+    details.addEventListener("toggle", () => {
+      if (!details.isConnected) return;
+      if (details.open) expandedPeople.add(key); else expandedPeople.delete(key);
+    });
+    detailCell.append(details); tr.append(detailCell); tbody.append(tr);
   }
-  box.append(t);
+  box.className = "table-wrap"; box.append(t);
 }
 
+let alertRecords = [], alertKey = "", alertBusy = false;
+function alertMessage(text, bad = false) { $("alertFeedback").textContent = text; $("alertFeedback").className = "msg " + (bad ? "bad" : "ok"); }
+$("clearAlertsBtn").onclick = async () => {
+  if (alertBusy || !confirm("Limpiar todas las alertas de la vista, incluidas las de otros filtros? La evidencia se conserva.")) return;
+  await alertAction($("clearAlertsBtn"), "/api/alerts", "DELETE", "Vista de alertas limpia.");
+};
+async function alertAction(button, url, method, message) {
+  if (alertBusy) return;
+  alertBusy = true; button.disabled = true;
+  try { await api(url, { method, ...(method === "POST" ? { body: "{}" } : {}) }); alertMessage(message); }
+  catch (e) { alertMessage(e.message, true); }
+  finally { alertBusy = false; button.disabled = false; }
+  await refresh();
+}
+$("alertFilter").onchange = () => { alertKey = ""; renderAlerts(alertRecords); };
 function renderAlerts(list) {
+  alertRecords = list;
+  $("clearAlertsBtn").hidden = !list.length;
+  const filter = $("alertFilter").value;
+  const filtered = list.filter(a => filter === "all" || (filter === "pending" ? !a.ack : a.ack));
+  $("alertCount").textContent = String(filtered.length);
+  const key = JSON.stringify([filter, list]);
+  if (key === alertKey || alertBusy) return; alertKey = key;
   const box = $("alerts"); box.replaceChildren();
-  if (!list.length) { box.className = "empty"; box.textContent = "Sin alertas."; return; }
+  if (!filtered.length) { box.className = "empty"; box.textContent = list.length ? "No hay alertas en este filtro." : "Sin alertas. Las nuevas apareceran aqui."; return; }
   box.className = "";
-  for (const a of list.slice(0, 15)) {
+  for (const a of filtered) {
     const d = el("div", "alert " + a.level + (a.ack ? " acked" : ""));
-    if (a.snapshot) { const i = el("img"); i.src = "/evidence/" + encodeURIComponent(a.snapshot); i.loading = "lazy"; d.append(i); }
-    const body = el("div"); body.style.flex = "1";
+    const content = el("div", "alert-content");
+    if (a.snapshot) {
+      const button = el("button", "evidence-button"), i = el("img");
+      i.src = "/evidence/" + encodeURIComponent(a.snapshot); i.loading = "lazy"; i.alt = "Ver evidencia";
+      button.setAttribute("aria-label", "Ampliar evidencia de " + a.camera_name);
+      button.append(i); button.onclick = () => { $("evidenceImage").src = i.src; $("evidenceTitle").textContent = "Evidencia · " + a.camera_name; $("evidenceDialog").showModal(); };
+      content.append(button);
+    }
+    const body = el("div");
     const who = a.track_id != null ? ` - persona ID ${a.track_id}` : "";
-    body.append(el("div", "lvl-" + a.level, (LEVEL[a.level] || a.level.toUpperCase()) + (a.shadow ? " (sombra)" : "") + " - " + a.camera_name + who));
-    body.append(el("div", "", a.reason || ""));
-    body.append(el("div", "meta", a.iso.replace("T", " ") + (a.source ? " - fuente: " + a.source : "")));
-    if (!a.ack) { const b = el("button", "sec", "Reconocer"); b.onclick = async () => { await api("/api/alerts/" + a.id + "/ack", { method: "POST", body: "{}" }); refresh(); }; body.append(b); }
-    d.append(body); box.append(d);
+    d.append(el("div", "alert-heading lvl-" + a.level, (LEVEL[a.level] || a.level.toUpperCase()) + (a.shadow ? " (sombra)" : "")));
+    body.append(el("p", "", a.camera_name + who), el("p", "", a.reason || ""));
+    body.append(el("div", "meta", (a.iso || "").replace("T", " ") + (a.source ? " · " + a.source : "")));
+    content.append(body); d.append(content);
+    const actions = el("div", "alert-actions");
+    if (!a.ack) { const b = el("button", "sec", "Reconocer"); b.onclick = () => alertAction(b, "/api/alerts/" + encodeURIComponent(a.id) + "/ack", "POST", "Alerta reconocida."); actions.append(b); }
+    else actions.append(el("span", "meta", "Reconocida"));
+    const rm = el("button", "del", "Eliminar"); rm.onclick = () => alertAction(rm, "/api/alerts/" + encodeURIComponent(a.id), "DELETE", "Alerta eliminada de la vista.");
+    actions.append(rm); d.append(actions); box.append(d);
   }
 }
 
+let refreshing = false;
 async function refresh() {
+  if (refreshing) return;
+  refreshing = true;
   try {
-    const [st, alerts] = await Promise.all([api("/api/status"), api("/api/alerts?limit=30")]);
+    const [st, alerts] = await Promise.all([api("/api/status"), api("/api/alerts?limit=200")]);
     renderCameras(st.cameras); renderPeople(st.cameras); renderAlerts(alerts);
     const g = st.gemini;
-    $("gem").textContent = g.active ? `Gemini: activo (${g.calls} consultas, ${g.tokens} tokens)` : `Gemini: apagado (${g.disabled_reason}) - solo heuristica local`;
-    $("gem").className = "pill " + (g.active ? "ok" : "warn");
-    $("alertsPill").textContent = "Alertas sin reconocer: " + st.active_alerts;
-    $("alertsPill").className = "pill " + (st.active_alerts ? "bad" : "ok");
+    const paused = g.active && g.paused_seconds > 0;
+    $("gem").textContent = paused ? "Gemini en pausa" : g.active ? "Gemini activo" : "Solo analisis local";
+    $("gem").title = g.active ? `${g.calls} consultas · ${g.tokens} tokens` + (paused ? ` · Pausa: ${g.paused_seconds} s` : "") : g.disabled_reason || "Gemini apagado";
+    $("gem").className = "pill " + (g.active && !paused ? "ok" : "warn");
+    $("alertsPill").textContent = st.active_alerts;
+    $("alertsPill").style.color = st.active_alerts ? "var(--warn)" : "var(--txt)";
+    $("cameraCount").textContent = st.cameras.filter(c => c.stream?.state === "connected").length + " / " + st.cameras.length;
+    $("peopleCount").textContent = st.cameras.reduce((n, c) => n + (c.people || []).length, 0);
+    $("lastUpdate").textContent = "Actualizado " + new Date().toLocaleTimeString("es", { hour:"2-digit", minute:"2-digit", second:"2-digit" });
+    $("serverNotice").hidden = true;
     const ids = new Set(alerts.map(a => a.id));
-    if (seenAlerts) alerts.filter(a => !seenAlerts.has(a.id) && !a.shadow).forEach(a => beep(a.level === "probable_sustraccion"));
+    if (seenAlerts) alerts.filter(a => !seenAlerts.has(a.id) && !a.shadow && !a.ack).forEach(a => beep(a.level === "probable_sustraccion"));
     seenAlerts = ids;
     renderCamList(st.cameras, st.credentials_store);
-  } catch (e) { $("alertsPill").textContent = "Sin conexion con el servidor"; $("alertsPill").className = "pill bad"; }
+  } catch (e) {
+    $("serverNotice").hidden = false; $("serverNotice").textContent = "Sin conexion con el servidor. Los datos visibles pueden estar desactualizados. Reintentando...";
+    $("lastUpdate").textContent = "Conexion interrumpida";
+  } finally { refreshing = false; }
 }
 
 const PORTS = { rtsp: 554, rtsps: 322, http: 80, https: 443 };
@@ -183,11 +374,11 @@ function formData() {
 }
 function resetForm() {
   form().reset(); form().elements.id.readOnly = false; form().elements.enabled.checked = true;
-  $("formTitle").textContent = "Agregar camara"; setPortHint();
+  $("formTitle").textContent = "Agregar camara"; $("advancedFields").open = false; setPortHint();
 }
 function say(cls, text) { const m = $("camMsg"); m.className = "msg " + cls; m.textContent = text; }
 async function run(btn, working, job) {
-  const buttons = [$("testBtn"), $("saveBtn")]; buttons.forEach(b => b.disabled = true); say("", working);
+  const buttons = [$("testBtn"), $("saveBtn"), $("clearBtn")]; buttons.forEach(b => b.disabled = true); say("", working);
   try { await job(); } catch (e) { say("bad", e.message); } finally { buttons.forEach(b => b.disabled = false); }
 }
 $("testBtn").onclick = () => run($("testBtn"), "Probando conexion (hasta 12 s)...", async () => {
@@ -201,11 +392,13 @@ $("saveBtn").onclick = () => run($("saveBtn"), "Guardando...", async () => {
 $("clearBtn").onclick = () => { resetForm(); say("", ""); };
 
 function editCamera(c) {
+  showView(true);
   const fe = form().elements;
   for (const k of ["id","name","protocol","brand","host","user","path"]) fe[k].value = c[k] ?? "";
   fe.port.value = c.port || ""; fe.url.value = ""; fe.password.value = "";
   fe.enabled.checked = c.enabled; fe.id.readOnly = true;
   fe.zones.value = c.zones ? JSON.stringify(c.zones) : "";
+  $("advancedFields").open = Boolean(c.zones && Object.keys(c.zones).length);
   $("formTitle").textContent = "Editando " + c.id; setPortHint(); say("", "");
   form().scrollIntoView({ behavior: "smooth" });
 }
@@ -218,17 +411,19 @@ function renderCamList(list, creds) {
   const key = JSON.stringify(list.map(c => [c.camera, c.stream && c.stream.state, c.stream && c.stream.last_error]));
   if (key === lastCamKey) return; lastCamKey = key;
   const box = $("camList"); box.replaceChildren();
+  if (!list.length) { box.append(el("div", "empty", "No hay camaras configuradas.")); return; }
   for (const item of list) {
     const c = item.camera, st = item.stream || {};
-    const row = el("div", "row"); row.style.marginBottom = "6px";
+    const itemBox = el("article", "camera-list-item"), row = el("div", "row");
     const state = el("span", "pill " + (st.state === "connected" ? "ok" : st.state === "disabled" ? "" : "bad"), STATE[st.state] || st.state);
-    row.append(el("span", "pill", c.id), state, el("span", "", c.name + " - " + c.url));
-    if (st.last_error && st.state !== "connected") row.append(el("span", "meta", st.last_error));
+    const heading = el("div", "row"); heading.append(el("strong", "", c.name), state);
+    itemBox.append(heading, el("div", "meta", c.id + " · " + (c.url || c.host || "")));
+    if (st.last_error && st.state !== "connected") itemBox.append(el("p", "msg bad", st.last_error));
     const edit = el("button", "sec", "Editar"); edit.onclick = () => editCamera(c);
     const toggle = el("button", "sec", c.enabled ? "Deshabilitar" : "Habilitar");
     toggle.onclick = async () => { toggle.disabled = true; try { await api("/api/cameras/" + encodeURIComponent(c.id) + "/enabled", { method: "POST", body: JSON.stringify({ enabled: !c.enabled }) }); } catch (e) { say("bad", e.message); } refresh(); };
     const del = el("button", "del", "Eliminar"); del.onclick = async () => { if (confirm("Eliminar " + c.name + "? Tambien se borra su contrasena guardada.")) { try { await api("/api/cameras/" + encodeURIComponent(c.id), { method: "DELETE" }); } catch (e) { say("bad", e.message); } refresh(); } };
-    row.append(edit, toggle, del); box.append(row);
+    row.append(edit, toggle, del); itemBox.append(row); box.append(itemBox);
   }
 }
 refresh(); setInterval(refresh, 2000);

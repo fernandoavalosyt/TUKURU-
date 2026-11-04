@@ -114,6 +114,12 @@ python -m tukuru
 
 Abra el panel: http://127.0.0.1:5000
 
+El panel separa **Monitoreo** (cámaras en vivo, personas e indicadores, alertas) de
+**Configuración** (alta, edición y conexión de cámaras). Las alertas se pueden filtrar
+por pendientes o reconocidas; pulsa la miniatura para ampliar la evidencia.
+**Eliminar** quita una alerta y **Limpiar vista** quita todas, conservando el registro
+y las fotos. Las alertas retiradas de la vista no reaparecen al reiniciar.
+
 ### Agregar una cámara
 
 Desde el panel, en "Agregar / editar cámara", complete IP, usuario, contraseña y marca, pegue las zonas y use "Probar conexión" antes de guardar. También puede definirla en `.env` (`CAMERA_1_URL`, `CAMERA_1_USER`, ...; ver `.env.example`).
