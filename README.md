@@ -197,6 +197,22 @@ models/           Pesos descargados (se crea al ejecutar)
 
 ## Pruebas
 
+### Experimento opcional de objetos (solo replay)
+
+Con un detector nano local en `models/yolov8n.pt`:
+
+```powershell
+python -m tukuru.replay video/video2.mp4 --zones video/zonas_video2.json --fps 10 --object-model models/yolov8n.pt --object-report data/prueba_objetos/objetos.json --out data/prueba_objetos/video2_objetos.mp4
+```
+
+La carpeta de salida del informe se crea automáticamente. Los pesos se obtienen de los
+[assets oficiales de Ultralytics](https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8n.pt).
+No se requieren paquetes adicionales. Sin `--object-model` no se carga ni ejecuta el detector.
+El experimento observa objetos junto a manos, estantes, cuerpo y contenedores; exporta
+las detecciones, transiciones y tiempo de inferencia en JSON y dibuja cajas en el video.
+No cambia puntuaciones, alertas ni el contexto de Gemini. El comando anterior es local y no usa Gemini.
+Detalles y límites en [docs/PRUEBAS.md](docs/PRUEBAS.md).
+
 ```
 python -m unittest discover -s tests
 ```

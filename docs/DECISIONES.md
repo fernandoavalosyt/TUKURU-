@@ -4,6 +4,14 @@ Registro de **por que** el sistema es como es. Si cambias una regla que afecte a
 
 ## Decisiones
 
+- **Experimento de objetos por evento (noviembre 2026):** se incorpora solo al replay,
+  mediante un modelo local opcional. La app en vivo y las decisiones existentes se conservan.
+  Se empieza con YOLOv8n de detección para no exigir otra dependencia ni cambiar la pose.
+  El objetivo inicial es medir cobertura y costo con `video2`, no asumir que COCO detecta
+  el empaque transparente. Asociación mano-objeto-destino conservadora, sin inferir
+  ocultamiento de una desaparición ni devolución por tocar el estante. Las relaciones
+  no cambian alertas ni el dictamen de Gemini hasta evaluar su utilidad con evidencia.
+
 1. **Pose barata + juez visual (Gemini).** Con solo YOLO-pose no se ve el producto. La pose dispara la revision y da respaldo; Gemini decide. Gemini no recibe video: solo un clip corto de recortes ante un posible ocultamiento (control de gasto).
 2. **La sustraccion es una secuencia corta, no un estado.** (Vigilia medía estados sostenidos de 10-30 s; el robo dura 1-3 s.) Secuencia: alcance -> ocultamiento -> salida. Por eso `INFERENCE_FPS=8`.
 3. **Seguimiento por mano.** En `video2` la mujer estaba parada junto al estante con una mano dentro del poligono casi todo el tiempo; la regla "ninguna mano en el estante" la dejaba ciega (cero eventos) mientras marcaba al hombre. Ahora cada mano tiene su alcance y su armado.

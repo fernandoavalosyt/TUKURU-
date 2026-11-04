@@ -1,5 +1,29 @@
 # Arquitectura
 
+## Observador experimental de objetos (`objects.py`)
+
+Disponible solamente en `replay` mediante `--object-model RUTA`, apagado por defecto.
+Una sola instancia de YOLO de detección, independiente del modelo de pose. Cada alcance
+confirmado abre una ventana de 8 s. Máximo 2 inferencias/s por persona y 4/s globales,
+con selección de la persona que lleva más tiempo sin analizar. Recorte de persona y
+muñecas sobre el cuadro original, `imgsz=416`, máximo 30 detecciones por llamada.
+No hay cola, hilos nuevos ni modelos por persona. Las sesiones desaparecen al perder el track.
+
+Asocia detecciones a la muñeca visible más cercana por distancia al rectángulo;
+rechaza distancias grandes y ambigüedad entre manos/personas. Persiste clase y centro
+con una puerta espacial/temporal; exige varias observaciones para cambiar de estado.
+Esto es asociación aproximada, no identificación visual inequívoca del mismo producto.
+Registra `objeto_en_estanteria`, `objeto_junto_a_mano`, `objeto_junto_al_cuerpo`,
+`objeto_junto_a_contenedor` y `desconocido` al perder evidencia. La posición del objeto,
+no solo la mano, determina proximidad al estante/contenedor. No determina inserción,
+pago, propiedad ni robo. Un celular conserva su etiqueta, no se convierte en producto.
+
+Se exportan detecciones con clase, confianza y caja en coordenadas del cuadro reducido,
+transiciones por mano y tiempos. La línea de tiempo original permanece separada.
+No escribe en `TrackState`, no interviene en `decide`, ni se envía como contexto a Gemini.
+`CONTAINERS` admite etiquetas de canasta para futuros pesos ajustados; COCO no incluye
+una clase general de canasta ni de producto de abarrotes.
+
 ## Flujo por camara (`pipeline.py`, un hilo por camara)
 
 ```

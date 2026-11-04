@@ -1,12 +1,58 @@
 # Pruebas, videos y calibracion
 
+## Experimento mano-objeto-destino (local, opcional)
+
+```powershell
+python -m tukuru.replay video/video2.mp4 --zones video/zonas_video2.json --fps 10 --object-model models/yolov8n.pt --object-report data/prueba_objetos/objetos.json --out data/prueba_objetos/video2_objetos.mp4
+```
+
+Ejecutar primero sin `--gemini`. Los resultados quedan en `data/` (ignorado por Git).
+Sin el interruptor, el replay conserva el comportamiento previo y no carga otro modelo.
+Los pesos deben existir localmente: no se descargan al ejecutar el experimento.
+Puede pasarse un detector ajustado con las mismas interfaces de Ultralytics.
+
+Revisar las detecciones cerca de 14–16 s para la mujer y los alcances/devoluciones del
+hombre. El JSON contiene todas las detecciones observadas, transiciones por mano,
+línea de tiempo original y costo total/promedio del detector. `hand=0` es izquierda
+anatómica, `hand=1` derecha. Las cajas están en el cuadro reducido.
+
+Comprobar visualmente cada relación; una etiqueta como `bottle` puede ser una confusión
+del modelo. Una caja cerca de una mano no demuestra agarre. `objeto_junto_a_contenedor`
+no significa que entró, y perderlo de vista significa `desconocido`. No se añade puntuación.
+No se cambia ningún umbral para hacer funcionar este video. El modelo COCO genérico
+no cubre todos los empaques ni reconoce una clase universal de producto/canasta.
+
+Las pruebas en `tests/test_objects.py` cubren persistencia, evidencia perdida,
+destinos observables, contenedor sin producto, asociaciones ambiguas, cambios de clase,
+saltos de posición y límites de inferencia. No necesitan descargar modelos.
+
+### Primera ejecución con YOLOv8n COCO (4 de noviembre de 2026)
+
+- `video2`, 10 fps de análisis, CPU, sin Gemini: 64 llamadas al detector.
+- Tiempo acumulado del detector: 6,106 s; promedio 95,41 ms por llamada.
+- Línea de tiempo de niveles, motivos, puntuaciones y eventos idéntica al replay sin detector.
+- 9 detecciones sin filtrar por asociación: 5 `bottle`, 2 `laptop`, 1 `teddy bear`, 1 `dog`.
+  Son predicciones del modelo, no etiquetas verificadas del video.
+- No hubo detecciones en las muestras de 14–16 s ni relaciones persistentes aceptadas.
+  El detector genérico no aportó evidencia del producto de la mujer. No demuestra mejora
+  de precisión y no se recomienda conectarlo a las alertas con estos pesos.
+- Artefactos locales: `data/prueba_objetos/objetos.json`, `comparacion.json` y
+  `video2_objetos.mp4`. El video de salida es nuevo; no sobrescribe los de referencia.
+
+La ejecución base tardó 53,42 s y la experimental con escritura de video 46,84 s.
+Ese orden está afectado por calentamiento/caché y distinta salida; no permite afirmar
+aceleración ni calcular sobrecosto porcentual. El tiempo del detector se midió aparte.
+Próximo paso si se desea continuar: reunir recortes etiquetados de productos y negativos
+para ajustar un nano, conservando videos completos separados para evaluación. No entrenar
+solo con `video2` ni confundir memorizar ese empaque con generalizar a la tienda.
+
 ## Pruebas unitarias
 
 ```
 python -m unittest discover -s tests
 ```
 
-47 pruebas (37 de deteccion en `tests/test_tukuru.py`, 10 de camaras/credenciales en `tests/test_camaras.py` con un llavero simulado), sin red ni modelos. Cubren validacion de camaras/zonas/ajustes y escenas sinteticas de puntos del cuerpo (`Scene` en `tests/test_tukuru.py`: persona de pie 640x360, alcance en `REACH`, bolsillo en `POCKET`, zonas `ZONES`). Una prueba por regla: alcance, roce, manos al bolsillo sin alcance, ventana vencida, muneca perdida, mirada lateral, personal, mano por mano, manos juntas, devolucion (mismo sitio / otro sitio / fuera de ventana), caminar, decision con/sin Gemini, pasar por caja, repeticion de alertas.
+59 pruebas (37 de deteccion en `tests/test_tukuru.py`, 10 de camaras/credenciales en `tests/test_camaras.py` con un llavero simulado, 12 del experimento de objetos en `tests/test_objects.py`), sin red ni modelos. Cubren validacion de camaras/zonas/ajustes y escenas sinteticas de puntos del cuerpo (`Scene` en `tests/test_tukuru.py`: persona de pie 640x360, alcance en `REACH`, bolsillo en `POCKET`, zonas `ZONES`). Una prueba por regla: alcance, roce, manos al bolsillo sin alcance, ventana vencida, muneca perdida, mirada lateral, personal, mano por mano, manos juntas, devolucion (mismo sitio / otro sitio / fuera de ventana), caminar, decision con/sin Gemini, pasar por caja, repeticion de alertas.
 
 ## Videos de prueba (carpeta `video/`)
 
