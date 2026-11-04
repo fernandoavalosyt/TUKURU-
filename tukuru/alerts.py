@@ -56,6 +56,25 @@ class AlertManager:
                     return True
         return False
 
+    def dismiss(self, alert_id: str) -> bool:
+        """Quita una alerta de la vista. El registro (alerts.jsonl) y la foto se conservan como auditoria."""
+        with self._lock:
+            for alert in self._alerts:
+                if alert["id"] == alert_id:
+                    self._alerts.remove(alert)
+                    self._append_log({"event": "dismiss", "id": alert_id, "time": time.time()})
+                    return True
+        return False
+
+    def dismiss_all(self) -> int:
+        """Limpia la vista de alertas. Devuelve cuantas se quitaron."""
+        with self._lock:
+            count = len(self._alerts)
+            if count:
+                self._alerts.clear()
+                self._append_log({"event": "dismiss_all", "time": time.time()})
+            return count
+
     def snapshot_path(self, name: str) -> Optional[Path]:
         path = (self.dir / name).resolve()
         return path if path.parent == self.dir.resolve() and path.is_file() else None
@@ -156,6 +175,10 @@ class AlertManager:
                     for alert in self._alerts:
                         if alert["id"] == item["id"]:
                             alert["ack"] = True
+                elif item.get("event") == "dismiss":
+                    self._alerts = deque((a for a in self._alerts if a["id"] != item["id"]), maxlen=200)
+                elif item.get("event") == "dismiss_all":
+                    self._alerts.clear()
                 elif "level" in item:
                     self._alerts.append(item)
         except (OSError, ValueError):

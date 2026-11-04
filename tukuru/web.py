@@ -85,6 +85,14 @@ def create_web(app_core: Tukuru) -> Flask:
     def ack(alert_id: str):
         return (jsonify(ok=True) if app_core.alerts.ack(alert_id) else (jsonify(error="no existe"), 404))
 
+    @web.delete("/api/alerts/<alert_id>")
+    def alert_dismiss(alert_id: str):
+        return (jsonify(ok=True) if app_core.alerts.dismiss(alert_id) else (jsonify(error="no existe"), 404))
+
+    @web.delete("/api/alerts")
+    def alerts_dismiss_all():
+        return jsonify(ok=True, removed=app_core.alerts.dismiss_all())
+
     @web.get("/evidence/<name>")
     def evidence(name: str):
         path = app_core.alerts.snapshot_path(name)

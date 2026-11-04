@@ -375,5 +375,38 @@ class AlertRepeat(unittest.TestCase):
             self.assertEqual(len(manager.recent()), 3)                     # escalar siempre avisa
 
 
+class AlertDismiss(unittest.TestCase):
+    def make(self, tmp):
+        return AlertManager(replace(Settings.from_env(), data_dir=Path(tmp), shadow_mode=False))
+
+    def emit_two(self, manager):
+        for i, t in enumerate((1.0, 50.0)):
+            ts = TrackState(i, "C", 0.0, 0.0)
+            ts.conceals.append(t)
+            manager.evaluate(ts, ("posible_ocultamiento", "local", "x"), t, "cam", lambda: None)
+
+    def test_dismiss_one_survives_restart(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = self.make(tmp)
+            self.emit_two(manager)
+            first, second = (a["id"] for a in manager.recent()[::-1])
+            self.assertTrue(manager.dismiss(first))
+            self.assertFalse(manager.dismiss(first))
+            self.assertEqual([a["id"] for a in manager.recent()], [second])
+            self.assertEqual(manager.active_count(), 1)
+            self.assertEqual([a["id"] for a in self.make(tmp).recent()], [second])      # tras reiniciar
+
+    def test_dismiss_all_survives_restart_and_keeps_log(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = self.make(tmp)
+            self.emit_two(manager)
+            self.assertEqual(manager.dismiss_all(), 2)
+            self.assertEqual(manager.dismiss_all(), 0)
+            self.assertEqual(self.make(tmp).recent(), [])
+            self.emit_two(manager)                                                       # alertas nuevas si aparecen
+            self.assertEqual(len(self.make(tmp).recent()), 2)
+            self.assertGreaterEqual(len(manager.log_file.read_text(encoding="utf-8").splitlines()), 4)
+
+
 if __name__ == "__main__":
     unittest.main()
