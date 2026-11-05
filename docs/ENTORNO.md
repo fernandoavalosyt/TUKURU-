@@ -8,10 +8,11 @@ Desde la raiz del repositorio:
 
 ```
 python scripts/preparar_entorno.py --solo-pruebas   # rapido: numpy + opencv (~100 MB)
-python scripts/preparar_entorno.py                  # completo: + torch/ultralytics (varios GB) y modelo YOLO
+python scripts/preparar_entorno.py                  # completo con PyTorch CPU
+python scripts/preparar_entorno.py --gpu            # completo con PyTorch CUDA para NVIDIA
 ```
 
-Crea `.venv`, instala dependencias, crea `.env` desde `.env.example` (sin pisar uno existente) y baja el modelo. Se puede repetir.
+Crea `.venv`, instala dependencias, crea `.env` desde `.env.example` (sin pisar uno existente) y baja el modelo. Se puede repetir. `--gpu` consulta `nvidia-smi`, elige la rueda CUDA compatible con el driver y comprueba `torch.cuda.is_available()`. La descarga puede ocupar varios GB. Sin `--gpu`, instala la rueda CPU; el resto del equipo no necesita NVIDIA.
 
 Despues, activar el entorno (o usar su Python directamente):
 
@@ -29,6 +30,21 @@ python -m unittest discover -s tests
 | Replay local (`python -m tukuru.replay ...`) | `requirements.txt` completo | `models/yolov8n-pose.pt` |
 | Replay con Gemini (`--gemini`) | `requirements.txt` | `GEMINI_API_KEY` propia en `.env`; **envia imagenes a la API: pedir autorizacion** |
 | Aplicacion (`python -m tukuru`) | `requirements.txt` | modelo + camaras (panel o `.env`) |
+
+## GPU NVIDIA
+
+Primero ejecute `nvidia-smi` en el mismo sistema donde corre Tukuru. En WSL debe mostrar el modelo, el driver y la version CUDA admitida. Luego:
+
+```
+python scripts/preparar_entorno.py --gpu
+.venv/bin/python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available())"
+```
+
+En Windows use `.venv\Scripts\python` en lugar de `.venv/bin/python`. El ultimo valor debe ser `True`. `DEVICE=auto` elige `cuda:0` si PyTorch ve la GPU y `cpu` en otro caso. Tambien se puede fijar `DEVICE=cpu`, `DEVICE=cuda:0` o `DEVICE=mps`. Si el `.env` local ya tiene `DEVICE=cpu`, cambielo a `auto` manualmente o use `DEVICE=auto python -m tukuru`; el script nunca modifica un `.env` existente.
+
+La RTX 4050 Laptop con driver 591.66 (CUDA maxima 13.1) usa la rueda `cu128` del indice oficial de PyTorch. El driver puede ejecutar una rueda CUDA anterior a su version maxima. La inferencia CUDA usa FP16 (`half=True` en Ultralytics anterior; `quantize=16` en versiones nuevas que deprecan `half`). Si CUDA falla durante la inferencia, Tukuru avisa y reintenta en CPU; ese reinicio del modelo pierde los IDs de seguimiento activos de esa camara.
+
+Para medir rendimiento sin Gemini, ejecute `python scripts/medir_rendimiento.py --device cpu --cameras 1` y repita con `--device cuda:0` y `--cameras 2` o `3`. El modo `trackers` usa una instancia de YOLO/ByteTrack por camara. `--mode predict-lock` y `--mode predict-batch` comparan solo la deteccion: no conservan IDs y no equivalen al pipeline completo. `munecas_visibles` cuenta puntos con confianza >= 0.40; no es una medida de exactitud contra anotaciones humanas.
 
 ## Instalacion manual (si el script no sirve)
 
@@ -63,3 +79,4 @@ El programa baja `yolov8n-pose.pt` a `models/` la primera vez que arranca (`ensu
 | `Configuracion invalida: ...` al arrancar | Valor fuera de rango en `.env`; el mensaje lista todos los errores juntos. Comparar con `.env.example` |
 | Git dice que `README.md` tiene cambios locales distintos | Es una edicion local sin subir. Ver `git diff README.md`; conservarla (`git add`/commit), descartarla (`git checkout -- README.md`) o guardarla (`git stash`) antes de `git pull` |
 | `torch` tarda o pesa mucho | Normal (varios GB). Para solo pruebas usar `--solo-pruebas` |
+| `torch.version.cuda` es `None` o `torch.cuda.is_available()` es `False` | Se instalo PyTorch CPU o WSL no expone la GPU. Ejecute `nvidia-smi`, luego `python scripts/preparar_entorno.py --gpu` y repita la comprobacion |

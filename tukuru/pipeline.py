@@ -75,7 +75,7 @@ class CameraPipeline(threading.Thread):
     def run(self) -> None:
         self.stream.start()
         try:
-            self.tracker = PoseTracker(self.model_path, self.s.device, self.s.yolo_conf)
+            self.tracker = PoseTracker(self.model_path, self.s.device, self.s.yolo_conf, self.s.max_side)
         except Exception:  # noqa: BLE001
             logger.exception("[%s] no se pudo cargar el modelo", self.cfg.id)
             self.stream.stop()

@@ -4,6 +4,7 @@ del cuerpo en un solo modelo). Las munecas y caderas alimentan la heuristica de 
 from __future__ import annotations
 
 import logging
+import gc
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +19,26 @@ NOSE, L_EYE, R_EYE, L_EAR, R_EAR, L_SH, R_SH, L_ELBOW, R_ELBOW, L_WRIST, R_WRIST
 SKELETON = [(5, 6), (5, 7), (7, 9), (6, 8), (8, 10), (5, 11), (6, 12), (11, 12), (11, 13), (13, 15), (12, 14),
             (14, 16), (0, 1), (0, 2), (1, 3), (2, 4)]
 KP_CONF = 0.40
+
+
+def resolve_device(requested: str, cuda_available: bool, mps_available: bool) -> str:
+    """Elige un dispositivo sin importar torch al leer la configuracion."""
+    if requested == "auto":
+        return "cuda:0" if cuda_available else "cpu"
+    if requested == "cuda:0" and not cuda_available:
+        return "cpu"
+    if requested == "mps" and not mps_available:
+        return "cpu"
+    return requested
+
+
+def fp16_arguments() -> dict:
+    """Ultralytics nuevo usa quantize=16; versiones anteriores usan half=True."""
+    try:
+        from ultralytics.cfg import DEFAULT_CFG_DICT
+    except ImportError:
+        return {"half": True}
+    return {"quantize": 16} if "quantize" in DEFAULT_CFG_DICT else {"half": True}
 
 
 @dataclass
@@ -48,23 +69,62 @@ def ensure_model(models_dir: Path, name: str) -> str:
 class PoseTracker:
     """YOLO-pose + ByteTrack. Una instancia por camara (el tracker conserva estado)."""
 
-    def __init__(self, model_path: str, device: str, conf: float) -> None:
+    def __init__(self, model_path: str, device: str, conf: float, imgsz: int = 640) -> None:
+        import torch
         from ultralytics import YOLO
 
+        self.model_path = model_path
         self.model = YOLO(model_path)
-        self.device = device
+        self.device = resolve_device(device, torch.cuda.is_available(), torch.backends.mps.is_available())
+        if device in ("cuda:0", "mps") and self.device == "cpu":
+            logger.warning("Dispositivo %s no disponible; se usara CPU", device)
         self.conf = conf
+        self.imgsz = imgsz
+        self.half = self.device.startswith("cuda")
+        self._precision = fp16_arguments() if self.half else {}
+        try:
+            self._warmup()
+        except Exception as exc:
+            if not self.half:
+                raise
+            self._fallback_cpu(exc)
+        logger.info("YOLO-pose en %s (%s)", self.device, "FP16" if self.half else "FP32")
+
+    def _warmup(self) -> None:
+        # predict inicia los kernels sin crear un track ficticio en ByteTrack.
+        dummy = np.zeros((self.imgsz, self.imgsz, 3), dtype=np.uint8)
+        self.model.predict(dummy, imgsz=self.imgsz, device=self.device, verbose=False, **self._precision)
+
+    def _fallback_cpu(self, exc: Exception) -> None:
+        import torch
+        from ultralytics import YOLO
+
+        logger.warning("CUDA fallo (%s); reiniciando YOLO-pose en CPU", exc)
+        self.model = YOLO(self.model_path)
+        gc.collect()
+        try:
+            torch.cuda.empty_cache()
+        except Exception:
+            logger.debug("No se pudo liberar la cache de CUDA", exc_info=True)
+        self.device, self.half, self._precision = "cpu", False, {}
+        self._warmup()
 
     def infer(self, frame: np.ndarray, imgsz: int) -> List[Person]:
-        results = self.model.track(frame, persist=True, tracker="bytetrack.yaml", classes=[0], conf=self.conf,
-                                   imgsz=imgsz, device=self.device, verbose=False)
+        try:
+            results = self.model.track(frame, persist=True, tracker="bytetrack.yaml", classes=[0], conf=self.conf,
+                                       imgsz=imgsz, device=self.device, verbose=False, **self._precision)
+        except Exception as exc:
+            if not self.half:
+                raise
+            self._fallback_cpu(exc)
+            results = self.model.track(frame, persist=True, tracker="bytetrack.yaml", classes=[0], conf=self.conf,
+                                       imgsz=imgsz, device=self.device, verbose=False)
         if not results:
             return []
         result = results[0]
         if result.boxes is None or result.boxes.id is None or result.keypoints is None:
             return []
-        ids = result.boxes.id.int().cpu().tolist()
-        boxes = result.boxes.xyxy.cpu().numpy()
-        confs = result.boxes.conf.cpu().numpy()
-        kpts = result.keypoints.data.cpu().numpy()
-        return [Person(int(i), boxes[n], float(confs[n]), kpts[n]) for n, i in enumerate(ids)]
+        boxes = result.boxes.cpu().numpy()
+        kpts = result.keypoints.cpu().numpy().data
+        return [Person(int(i), boxes.xyxy[n], float(boxes.conf[n]), kpts[n])
+                for n, i in enumerate(boxes.id.astype(int))]

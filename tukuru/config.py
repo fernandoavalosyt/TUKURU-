@@ -139,7 +139,7 @@ class Settings:
             data_dir=Path(r.text("TUKURU_DATA_DIR", str(ROOT / "data"))),
             models_dir=Path(r.text("TUKURU_MODELS_DIR", str(ROOT / "models"))),
             yolo_model=r.text("YOLO_MODEL", "yolov8n-pose.pt"),
-            device=r.text("DEVICE", "cpu"),
+            device=r.choice("DEVICE", "auto", ("auto", "cpu", "cuda:0", "mps")),
             yolo_conf=r.num("YOLO_CONF", 0.40, 0.05, 0.95),
             inference_fps=r.num("INFERENCE_FPS", 8.0, 0.5, 30.0),
             idle_fps=r.num("IDLE_FPS", 2.0, 0.2, 10.0),

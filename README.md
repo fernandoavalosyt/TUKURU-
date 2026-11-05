@@ -138,6 +138,7 @@ Todas las opciones están en `.env.example`. Las principales:
 | `INFERENCE_FPS` | 8 | Análisis por segundo con personas en escena |
 | `IDLE_FPS` | 2 | Análisis por segundo con la tienda vacía |
 | `MAX_FRAME_SIDE` | 640 | Lado máximo del frame analizado |
+| `DEVICE` | auto | CUDA si está disponible; CPU si no (`cpu`, `cuda:0`, `mps`) |
 | `CONCEAL_WINDOW_SECONDS` | 8 | Ventana tras el alcance en que la mano al cuerpo cuenta |
 | `CONCEAL_MIN_SECONDS` | 0.6 | Permanencia de la mano junto al cuerpo |
 | `RETURN_WINDOW_SECONDS` | 6 | Si la misma mano vuelve al mismo sitio del estante en este tiempo, se anula |

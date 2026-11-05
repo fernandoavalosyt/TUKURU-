@@ -26,6 +26,7 @@ Con solo la pose **no se ve el producto**. "Meter algo al bolso" y "mirar el cel
 ## Comandos
 
 Entorno nuevo (equipo): `python scripts/preparar_entorno.py --solo-pruebas` (o sin flag para todo). Detalle en `docs/ENTORNO.md`.
+Equipo NVIDIA: `python scripts/preparar_entorno.py --gpu`; `DEVICE=auto` usa CUDA cuando PyTorch la ve.
 
 ```
 pip install -r requirements.txt            # requirements-test.txt si solo vas a correr pruebas
@@ -33,6 +34,8 @@ copy .env.example .env                     # (Windows) y completar GEMINI_API_KE
 python -m tukuru                           # app + panel en http://127.0.0.1:5000
 python -m unittest discover -s tests       # pruebas (unittest, no pytest)
 python -m tukuru.replay VIDEO --zones ZONAS.json --fps 10 --dashboard --out SALIDA.mp4
+DEVICE=cpu GEMINI_ENABLED=false python -m tukuru.replay video/video2.mp4 --zones video/zonas_video2.json --fps 10
+DEVICE=cuda:0 GEMINI_ENABLED=false python -m tukuru.replay video/video2.mp4 --zones video/zonas_video2.json --fps 10
 python -m tukuru.replay ... --gemini --save-clips CARPETA    # revision REAL con Gemini (ver reglas)
 ```
 
@@ -85,6 +88,8 @@ Flujo y estructuras en `docs/ARQUITECTURA.md`.
 - Los modelos 3.x gastan tokens "pensando": `max_output_tokens` bajo corta el JSON.
 - Una persona parada junto al estante tiene una mano "dentro" de la zona por perspectiva: por eso el seguimiento es **por mano** y caminar no cuenta como alcance.
 - Si el seguimiento cambia el ID (oclusion), la secuencia en curso se pierde.
+- `nvidia-smi` visible no basta: si `torch.version.cuda` es `None`, la rueda es solo CPU. En WSL la RTX 4050 Laptop (6 GB, driver 591.66) admite la rueda `cu128`; `scripts/preparar_entorno.py --gpu` la instala cuando la descarga de dependencias termine. La rueda `nvidia-cudnn-cu12` sola supera 600 MB y en esta red se descargaba a ~55 KB/s; la medicion GPU quedo pendiente. El `.env` local puede contener `DEVICE=cpu` y anular el nuevo valor por defecto `auto`; no modificarlo sin indicacion del usuario.
+- Cada camara mantiene su propio YOLO/ByteTrack para conservar IDs independientes. Si CUDA falla, el tracker se reinicia en CPU y se pierden los IDs activos de esa camara.
 
 ## Documentos
 

@@ -122,7 +122,8 @@ def _run(video: Path, zones: Optional[dict], fps: float, model: str, out: Option
     src_fps = capture.get(cv2.CAP_PROP_FPS) or 25.0
     stride = max(1, round(src_fps / fps))
     eff_fps = src_fps / stride
-    tracker = PoseTracker(ensure_model(settings.models_dir, model), settings.device, settings.yolo_conf)
+    tracker = PoseTracker(ensure_model(settings.models_dir, model), settings.device, settings.yolo_conf,
+                          settings.max_side)
     optimizer = FrameOptimizer(settings.max_side)
     alerts = AlertManager(settings)
     judge = GeminiJudge(settings) if use_gemini else None

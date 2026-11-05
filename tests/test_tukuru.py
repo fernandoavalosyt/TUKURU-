@@ -1,16 +1,20 @@
 import os
+import sys
 import tempfile
+import types
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 
+from scripts.preparar_entorno import cuda_index_for
 from tukuru.alerts import AlertManager
 from tukuru.config import ConfigError, Settings, validate_camera
 from tukuru.decision import decide
 from tukuru.heuristics import TrackState, clear_through, update_track
-from tukuru.vision import Person
+from tukuru.vision import Person, PoseTracker, fp16_arguments, resolve_device
 from tukuru.zones import ZoneSet
 
 
@@ -87,6 +91,16 @@ class SettingsValidation(unittest.TestCase):
         self.assertEqual(s.inference_fps, 8.0)
         self.assertEqual(s.max_cameras, 3)
 
+    def test_device_choices_and_default(self):
+        with patch.dict(os.environ, {"DEVICE": ""}):
+            self.assertEqual(Settings.from_env().device, "auto")
+        for choice in ("auto", "cpu", "cuda:0", "mps"):
+            with patch.dict(os.environ, {"DEVICE": choice}):
+                self.assertEqual(Settings.from_env().device, choice)
+        with patch.dict(os.environ, {"DEVICE": "cuda:99"}):
+            with self.assertRaisesRegex(ConfigError, "DEVICE"):
+                Settings.from_env()
+
     def test_probable_score_must_exceed_possible(self):
         os.environ.update(LOCAL_POSSIBLE_SCORE="0.9", LOCAL_PROBABLE_SCORE="0.8")
         try:
@@ -95,6 +109,77 @@ class SettingsValidation(unittest.TestCase):
         finally:
             for k in ("LOCAL_POSSIBLE_SCORE", "LOCAL_PROBABLE_SCORE"):
                 os.environ.pop(k, None)
+
+
+class DeviceSelection(unittest.TestCase):
+    def test_fp16_arguments_follow_ultralytics_version(self):
+        with patch.dict(sys.modules, {"ultralytics.cfg": types.SimpleNamespace(DEFAULT_CFG_DICT={"quantize": None})}):
+            self.assertEqual(fp16_arguments(), {"quantize": 16})
+        with patch.dict(sys.modules, {"ultralytics.cfg": types.SimpleNamespace(DEFAULT_CFG_DICT={})}):
+            self.assertEqual(fp16_arguments(), {"half": True})
+
+    def test_cuda_index_matches_driver_support(self):
+        self.assertTrue(cuda_index_for("13.1").endswith("/cu128"))
+        self.assertTrue(cuda_index_for("13.2").endswith("/cu132"))
+        self.assertTrue(cuda_index_for("12.6").endswith("/cu126"))
+        with self.assertRaises(ValueError):
+            cuda_index_for("12.5")
+
+    def test_auto_and_explicit_fallback(self):
+        self.assertEqual(resolve_device("auto", True, False), "cuda:0")
+        self.assertEqual(resolve_device("auto", False, True), "cpu")
+        self.assertEqual(resolve_device("cuda:0", False, False), "cpu")
+        self.assertEqual(resolve_device("mps", False, False), "cpu")
+        self.assertEqual(resolve_device("mps", False, True), "mps")
+        self.assertEqual(resolve_device("cpu", True, True), "cpu")
+
+    def test_cuda_warmup_error_falls_back_to_cpu_without_real_torch(self):
+        devices = []
+
+        class FakeYOLO:
+            def __init__(self, path):
+                self.path = path
+
+            def predict(self, image, *, device, half=False, **kwargs):
+                devices.append((device, half))
+                if device == "cuda:0":
+                    raise RuntimeError("CUDA out of memory")
+
+        torch = types.SimpleNamespace(
+            cuda=types.SimpleNamespace(is_available=lambda: True, empty_cache=lambda: None),
+            backends=types.SimpleNamespace(mps=types.SimpleNamespace(is_available=lambda: False)),
+        )
+        with patch.dict(sys.modules, {"torch": torch, "ultralytics": types.SimpleNamespace(YOLO=FakeYOLO)}):
+            tracker = PoseTracker("falso.pt", "auto", 0.4, 32)
+        self.assertEqual((tracker.device, tracker.half), ("cpu", False))
+        self.assertEqual(devices, [("cuda:0", True), ("cpu", False)])
+
+    def test_cuda_inference_error_retries_on_cpu_without_real_torch(self):
+        calls = []
+
+        class FakeYOLO:
+            def __init__(self, path):
+                self.path = path
+
+            def predict(self, image, *, device, **kwargs):
+                calls.append(("warmup", device))
+
+            def track(self, image, *, device, **kwargs):
+                calls.append(("track", device))
+                if device == "cuda:0":
+                    raise RuntimeError("CUDA out of memory")
+                return []
+
+        torch = types.SimpleNamespace(
+            cuda=types.SimpleNamespace(is_available=lambda: True, empty_cache=lambda: None),
+            backends=types.SimpleNamespace(mps=types.SimpleNamespace(is_available=lambda: False)),
+        )
+        with patch.dict(sys.modules, {"torch": torch, "ultralytics": types.SimpleNamespace(YOLO=FakeYOLO)}):
+            tracker = PoseTracker("falso.pt", "auto", 0.4, 32)
+            self.assertEqual(tracker.infer(np.zeros((32, 32, 3), dtype=np.uint8), 32), [])
+        self.assertEqual((tracker.device, tracker.half), ("cpu", False))
+        self.assertEqual(calls, [("warmup", "cuda:0"), ("track", "cuda:0"),
+                                 ("warmup", "cpu"), ("track", "cpu")])
 
 
 class Zones(unittest.TestCase):
