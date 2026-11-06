@@ -1,16 +1,22 @@
 import os
+import sys
 import tempfile
+import types
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 
+from scripts.preparar_entorno import cuda_index_for
 from tukuru.alerts import AlertManager
 from tukuru.config import ConfigError, Settings, validate_camera
 from tukuru.decision import decide
 from tukuru.heuristics import TrackState, clear_through, update_track
-from tukuru.vision import Person
+from tukuru.vision import Person, PoseTracker, fp16_arguments, resolve_device
+from tukuru.tracker_config import bytetrack_config
+from tukuru.telegram import parse_review
 from tukuru.zones import ZoneSet
 
 
@@ -86,6 +92,51 @@ class SettingsValidation(unittest.TestCase):
         s = Settings.from_env()
         self.assertEqual(s.inference_fps, 8.0)
         self.assertEqual(s.max_cameras, 3)
+        self.assertEqual(s.track_buffer_frames, 60)
+
+    def test_track_buffer_is_configurable_with_safe_range(self):
+        for value in (15, 30, 60, 240):
+            with patch.dict(os.environ, {"TRACK_BUFFER_FRAMES": str(value)}):
+                self.assertEqual(Settings.from_env().track_buffer_frames, value)
+        with patch.dict(os.environ, {"TRACK_BUFFER_FRAMES": "241"}):
+            with self.assertRaisesRegex(ConfigError, "TRACK_BUFFER_FRAMES"):
+                Settings.from_env()
+
+    def test_tracker_yaml_uses_configured_buffer_without_mutating_ultralytics_defaults(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(bytetrack_config(Path(tmp), 60))
+            content = path.read_text(encoding="utf-8")
+            self.assertIn("track_buffer: 60", content)
+            self.assertIn("track_low_thresh: 0.1", content)
+            self.assertTrue(path.is_relative_to(Path(tmp)))
+
+    def test_device_choices_and_default(self):
+        with patch.dict(os.environ, {"DEVICE": ""}):
+            self.assertEqual(Settings.from_env().device, "auto")
+        for choice in ("auto", "cpu", "cuda:0", "mps"):
+            with patch.dict(os.environ, {"DEVICE": choice}):
+                self.assertEqual(Settings.from_env().device, choice)
+        with patch.dict(os.environ, {"DEVICE": "cuda:99"}):
+            with self.assertRaisesRegex(ConfigError, "DEVICE"):
+                Settings.from_env()
+
+    def test_telegram_requires_complete_configuration(self):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "token", "TELEGRAM_CHAT_ID": "",
+                                     "TELEGRAM_ALLOWED_USER_IDS": ""}):
+            with self.assertRaisesRegex(ConfigError, "Telegram requiere"):
+                Settings.from_env()
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "token", "TELEGRAM_CHAT_ID": "-100123",
+                                     "TELEGRAM_ALLOWED_USER_IDS": "123,456"}):
+            s = Settings.from_env()
+            self.assertEqual((s.telegram_chat_id, s.telegram_allowed_user_ids), ("-100123", (123, 456)))
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "", "TELEGRAM_CHAT_ID": "",
+                                     "TELEGRAM_ALLOWED_USER_IDS": ""}):
+            self.assertIsNone(Settings.from_env().telegram_bot_token)
+
+    def test_shadow_model_path_is_relative_to_project(self):
+        with patch.dict(os.environ, {"ML_SHADOW_MODEL": "data/models_ml/candidato.json"}):
+            path = Settings.from_env().ml_shadow_model
+        self.assertEqual(path, Path(__file__).resolve().parent.parent / "data/models_ml/candidato.json")
 
     def test_probable_score_must_exceed_possible(self):
         os.environ.update(LOCAL_POSSIBLE_SCORE="0.9", LOCAL_PROBABLE_SCORE="0.8")
@@ -95,6 +146,87 @@ class SettingsValidation(unittest.TestCase):
         finally:
             for k in ("LOCAL_POSSIBLE_SCORE", "LOCAL_PROBABLE_SCORE"):
                 os.environ.pop(k, None)
+
+
+class TelegramReview(unittest.TestCase):
+    def test_only_allowed_user_in_configured_chat_can_review(self):
+        update = {"callback_query": {"from": {"id": 42}, "message": {"chat": {"id": -100123}},
+                                     "data": "review:abcdef12:c"}}
+        self.assertEqual(parse_review(update, "-100123", (42,)), ("abcdef12", "confirmado", 42))
+        self.assertIsNone(parse_review(update, "-100999", (42,)))
+        self.assertIsNone(parse_review(update, "-100123", (43,)))
+        update["callback_query"]["data"] = "review:abcdef12:bad"
+        self.assertIsNone(parse_review(update, "-100123", (42,)))
+
+class DeviceSelection(unittest.TestCase):
+    def test_fp16_arguments_follow_ultralytics_version(self):
+        with patch.dict(sys.modules, {"ultralytics.cfg": types.SimpleNamespace(DEFAULT_CFG_DICT={"quantize": None})}):
+            self.assertEqual(fp16_arguments(), {"quantize": 16})
+        with patch.dict(sys.modules, {"ultralytics.cfg": types.SimpleNamespace(DEFAULT_CFG_DICT={})}):
+            self.assertEqual(fp16_arguments(), {"half": True})
+
+    def test_cuda_index_matches_driver_support(self):
+        self.assertTrue(cuda_index_for("13.1").endswith("/cu128"))
+        self.assertTrue(cuda_index_for("13.2").endswith("/cu132"))
+        self.assertTrue(cuda_index_for("12.6").endswith("/cu126"))
+        with self.assertRaises(ValueError):
+            cuda_index_for("12.5")
+
+    def test_auto_and_explicit_fallback(self):
+        self.assertEqual(resolve_device("auto", True, False), "cuda:0")
+        self.assertEqual(resolve_device("auto", False, True), "cpu")
+        self.assertEqual(resolve_device("cuda:0", False, False), "cpu")
+        self.assertEqual(resolve_device("mps", False, False), "cpu")
+        self.assertEqual(resolve_device("mps", False, True), "mps")
+        self.assertEqual(resolve_device("cpu", True, True), "cpu")
+
+    def test_cuda_warmup_error_falls_back_to_cpu_without_real_torch(self):
+        devices = []
+
+        class FakeYOLO:
+            def __init__(self, path):
+                self.path = path
+
+            def predict(self, image, *, device, half=False, **kwargs):
+                devices.append((device, half))
+                if device == "cuda:0":
+                    raise RuntimeError("CUDA out of memory")
+
+        torch = types.SimpleNamespace(
+            cuda=types.SimpleNamespace(is_available=lambda: True, empty_cache=lambda: None),
+            backends=types.SimpleNamespace(mps=types.SimpleNamespace(is_available=lambda: False)),
+        )
+        with patch.dict(sys.modules, {"torch": torch, "ultralytics": types.SimpleNamespace(YOLO=FakeYOLO)}):
+            tracker = PoseTracker("falso.pt", "auto", 0.4, 32)
+        self.assertEqual((tracker.device, tracker.half), ("cpu", False))
+        self.assertEqual(devices, [("cuda:0", True), ("cpu", False)])
+
+    def test_cuda_inference_error_retries_on_cpu_without_real_torch(self):
+        calls = []
+
+        class FakeYOLO:
+            def __init__(self, path):
+                self.path = path
+
+            def predict(self, image, *, device, **kwargs):
+                calls.append(("warmup", device))
+
+            def track(self, image, *, device, **kwargs):
+                calls.append(("track", device))
+                if device == "cuda:0":
+                    raise RuntimeError("CUDA out of memory")
+                return []
+
+        torch = types.SimpleNamespace(
+            cuda=types.SimpleNamespace(is_available=lambda: True, empty_cache=lambda: None),
+            backends=types.SimpleNamespace(mps=types.SimpleNamespace(is_available=lambda: False)),
+        )
+        with patch.dict(sys.modules, {"torch": torch, "ultralytics": types.SimpleNamespace(YOLO=FakeYOLO)}):
+            tracker = PoseTracker("falso.pt", "auto", 0.4, 32)
+            self.assertEqual(tracker.infer(np.zeros((32, 32, 3), dtype=np.uint8), 32), [])
+        self.assertEqual((tracker.device, tracker.half), ("cpu", False))
+        self.assertEqual(calls, [("warmup", "cuda:0"), ("track", "cuda:0"),
+                                 ("warmup", "cpu"), ("track", "cpu")])
 
 
 class Zones(unittest.TestCase):
@@ -254,6 +386,22 @@ class Decision(Scene, unittest.TestCase):
         self.steal()
         self.assertEqual(decide(self.ts, self.t, self.s)[0], "observacion")   # revision pendiente: no se alerta a ciegas
 
+    def test_single_concealment_without_return_prompts_early_review(self):
+        self.play(2)
+        self.steal()
+        self.play(3.2)
+        self.assertEqual(decide(self.ts, self.t, self.s)[:2], ("posible_ocultamiento", "local"))
+
+    def test_high_score_not_silenced_by_pending_gemini(self):
+        self.steal()
+        self.ts.score = self.s.local_possible_score + .1
+        self.ts.review_pending = True
+        self.assertEqual(decide(self.ts, self.t, self.s)[:2], ("posible_ocultamiento", "local"))
+
+    def test_early_review_requires_observed_concealment(self):
+        self.ts.score = 2.0
+        self.assertEqual(decide(self.ts, self.t, self.s)[0], "ok")
+
     def test_gemini_confirms_then_exit_escalates(self):
         self.play(2)
         self.steal()
@@ -359,6 +507,35 @@ class PerHand(Scene, unittest.TestCase):
 
 
 class AlertRepeat(unittest.TestCase):
+    def test_cleared_sequence_is_resolved_but_still_needs_human_label(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            settings = replace(Settings.from_env(), data_dir=Path(tmp), shadow_mode=False)
+            manager = AlertManager(settings)
+            ts = TrackState(1, "C", 0.0, 0.0)
+            ts.conceals.append(1.0)
+            manager.evaluate(ts, ("posible_ocultamiento", "local", "x"), 2.0, "cam", lambda: None)
+            alert_id = manager.recent()[0]["id"]
+            self.assertEqual(manager.active_count(), 1)
+
+            ts.events.append((3.0, "devolucion", 0.0))
+            ts.cleared_until = 1.0
+            manager.evaluate(ts, ("observacion", "local", "devuelto"), 3.0, "cam", lambda: None)
+            self.assertEqual(manager.active_count(), 0)
+            self.assertEqual(manager.recent()[0]["resolved"], "devolucion")
+            self.assertNotIn("review", manager.recent()[0])
+            self.assertEqual(AlertManager(settings).recent()[0]["resolved"], "devolucion")
+            self.assertTrue(manager.review(alert_id, "descartado", "operador", "panel"))
+
+    def test_gemini_clear_is_not_mislabeled_as_return(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = AlertManager(replace(Settings.from_env(), data_dir=Path(tmp), shadow_mode=False))
+            ts = TrackState(1, "C", 0.0, 0.0)
+            ts.conceals.append(1.0)
+            manager.evaluate(ts, ("posible_ocultamiento", "local", "x"), 2.0, "cam", lambda: None)
+            ts.cleared_until = 1.0
+            manager.evaluate(ts, ("ok", "", ""), 3.0, "cam", lambda: None)
+            self.assertEqual(manager.recent()[0]["resolved"], "revision_visual")
+
     def test_repeats_respect_cooldown_but_escalation_is_immediate(self):
         with tempfile.TemporaryDirectory() as tmp:
             manager = AlertManager(replace(Settings.from_env(), data_dir=Path(tmp), shadow_mode=False))

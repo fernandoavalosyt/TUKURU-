@@ -10,6 +10,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import logging
+import math
 import os
 import re
 import threading
@@ -84,6 +85,7 @@ class Settings:
     inference_fps: float
     idle_fps: float
     max_side: int
+    track_buffer_frames: int
     # Gemini
     gemini_api_key: Optional[str]
     gemini_enabled: bool
@@ -108,6 +110,10 @@ class Settings:
     shadow_mode: bool
     alert_repeat_seconds: float
     alert_webhook_url: Optional[str]
+    telegram_bot_token: Optional[str]
+    telegram_chat_id: Optional[str]
+    telegram_allowed_user_ids: tuple[int, ...]
+    ml_shadow_model: Optional[Path]
     alert_retention_days: int
     camera_offline_seconds: float
     # Web
@@ -128,6 +134,25 @@ class Settings:
         webhook = r.text("ALERT_WEBHOOK_URL") or None
         if webhook and not re.match(r"^https?://[^\s]+$", webhook):
             r.errors.append("ALERT_WEBHOOK_URL debe ser una URL http(s)")
+        telegram_token = r.text("TELEGRAM_BOT_TOKEN") or None
+        telegram_chat = r.text("TELEGRAM_CHAT_ID") or None
+        telegram_users_raw = r.text("TELEGRAM_ALLOWED_USER_IDS")
+        shadow_model_raw = r.text("ML_SHADOW_MODEL")
+        shadow_model = Path(shadow_model_raw) if shadow_model_raw else None
+        if shadow_model and not shadow_model.is_absolute():
+            shadow_model = ROOT / shadow_model
+        telegram_users: tuple[int, ...] = ()
+        if telegram_users_raw:
+            try:
+                telegram_users = tuple(int(part.strip()) for part in telegram_users_raw.split(","))
+                if not telegram_users or any(user <= 0 for user in telegram_users):
+                    raise ValueError
+            except ValueError:
+                r.errors.append("TELEGRAM_ALLOWED_USER_IDS debe ser una lista de IDs positivos separados por coma")
+        if any((telegram_token, telegram_chat, telegram_users_raw)) and not all((telegram_token, telegram_chat, telegram_users)):
+            r.errors.append("Telegram requiere TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID y TELEGRAM_ALLOWED_USER_IDS")
+        if telegram_chat and not re.fullmatch(r"-?\d+", telegram_chat):
+            r.errors.append("TELEGRAM_CHAT_ID debe ser un ID numerico")
         web_user, web_password = r.text("DASHBOARD_USER") or None, r.text("DASHBOARD_PASSWORD") or None
         if bool(web_user) != bool(web_password):
             r.errors.append("DASHBOARD_USER y DASHBOARD_PASSWORD deben definirse juntos")
@@ -139,14 +164,15 @@ class Settings:
             data_dir=Path(r.text("TUKURU_DATA_DIR", str(ROOT / "data"))),
             models_dir=Path(r.text("TUKURU_MODELS_DIR", str(ROOT / "models"))),
             yolo_model=r.text("YOLO_MODEL", "yolov8n-pose.pt"),
-            device=r.text("DEVICE", "cpu"),
+            device=r.choice("DEVICE", "auto", ("auto", "cpu", "cuda:0", "mps")),
             yolo_conf=r.num("YOLO_CONF", 0.40, 0.05, 0.95),
             inference_fps=r.num("INFERENCE_FPS", 8.0, 0.5, 30.0),
             idle_fps=r.num("IDLE_FPS", 2.0, 0.2, 10.0),
             max_side=r.num("MAX_FRAME_SIDE", 640, 320, 1280, int),
+            track_buffer_frames=r.num("TRACK_BUFFER_FRAMES", 60, 15, 240, int),
             gemini_api_key=key,
             gemini_enabled=r.flag("GEMINI_ENABLED", True),
-            gemini_model=r.text("GEMINI_MODEL", "gemini-3.8-flash"),
+            gemini_model=r.text("GEMINI_MODEL", "gemini-3-flash-preview"),
             gemini_timeout=r.num("GEMINI_TIMEOUT_SECONDS", 20.0, 3.0, 120.0),
             gemini_cooldown=r.num("GEMINI_COOLDOWN_SECONDS", 10.0, 3.0, 600.0),
             gemini_frames=r.num("GEMINI_FRAMES", 12, 1, 12, int),
@@ -165,6 +191,10 @@ class Settings:
             shadow_mode=r.flag("SHADOW_MODE", False),
             alert_repeat_seconds=r.num("ALERT_REPEAT_SECONDS", 30.0, 0.0, 3600.0),
             alert_webhook_url=webhook,
+            telegram_bot_token=telegram_token,
+            telegram_chat_id=telegram_chat,
+            telegram_allowed_user_ids=telegram_users,
+            ml_shadow_model=shadow_model,
             alert_retention_days=r.num("ALERT_RETENTION_DAYS", 30, 1, 3650, int),
             camera_offline_seconds=r.num("CAMERA_OFFLINE_SECONDS", 60.0, 10.0, 3600.0),
             web_host=web_host,
@@ -223,6 +253,9 @@ class CameraConfig:
     brand: str = "generico"
     zones: Optional[Dict[str, List[List[List[float]]]]] = None   # tipo -> poligonos normalizados (0-1)
     enabled: bool = True
+    recording_group_id: str = ""
+    yolo_conf: Optional[float] = None
+    min_person_height: Optional[float] = None
 
     @property
     def is_network(self) -> bool:
@@ -246,12 +279,15 @@ class CameraConfig:
         """Representacion sin contrasena para la API."""
         return {"id": self.id, "name": self.name, "protocol": self.protocol, "host": self.host, "port": self.port,
                 "user": self.user, "has_password": bool(self.password), "path": self.path, "brand": self.brand,
-                "zones": self.zones, "enabled": self.enabled, "url": self.safe_url()}
+                "zones": self.zones, "enabled": self.enabled, "recording_group_id": self.recording_group_id,
+                "yolo_conf": self.yolo_conf, "min_person_height": self.min_person_height,
+                "url": self.safe_url()}
 
     def to_json(self) -> Dict[str, Any]:
         return {"id": self.id, "name": self.name, "protocol": self.protocol, "host": self.host, "port": self.port,
                 "user": self.user, "password": self.password, "path": self.path, "brand": self.brand,
-                "zones": self.zones, "enabled": self.enabled}
+                "zones": self.zones, "enabled": self.enabled, "recording_group_id": self.recording_group_id,
+                "yolo_conf": self.yolo_conf, "min_person_height": self.min_person_height}
 
 
 def _clean_text(value: Any, field_name: str, max_len: int, required: bool = False) -> str:
@@ -349,6 +385,26 @@ def validate_camera(data: Dict[str, Any], *, allow_local: bool = False, existing
         raise ValueError(f"brand: use uno de {', '.join(BRAND_PATHS)}")
     zones = _validate_zones(data.get("zones"))
     enabled = bool(data.get("enabled", True))
+    recording_group_id = _clean_text(data.get("recording_group_id"), "grupo de grabacion", 80)
+    if recording_group_id and not re.fullmatch(r"[A-Za-z0-9_.:-]+", recording_group_id):
+        raise ValueError("grupo de grabacion: use letras, numeros, punto, guion o dos puntos")
+
+    def camera_number(key: str, minimum: float, maximum: float) -> Optional[float]:
+        raw = data.get(key)
+        if raw is None or raw == "":
+            return None
+        if isinstance(raw, bool):
+            raise ValueError(f"{key}: debe ser un numero entre {minimum} y {maximum}")
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            raise ValueError(f"{key}: debe ser un numero entre {minimum} y {maximum}") from None
+        if not math.isfinite(value) or not minimum <= value <= maximum:
+            raise ValueError(f"{key}: debe estar entre {minimum} y {maximum}")
+        return value
+
+    yolo_conf = camera_number("yolo_conf", 0.05, 0.95)
+    min_person_height = camera_number("min_person_height", 0.01, 0.50)
 
     host, port, user, password, path = "", 0, "", "", "/"
     if protocol in NETWORK_PROTOCOLS:
@@ -378,7 +434,9 @@ def validate_camera(data: Dict[str, Any], *, allow_local: bool = False, existing
             raise ValueError(f"path: el archivo '{path}' no existe")
 
     return CameraConfig(id=cam_id or "", name=name, protocol=protocol, host=host, port=port, user=user,
-                        password=password, path=path, brand=brand, zones=zones, enabled=enabled)
+                        password=password, path=path, brand=brand, zones=zones, enabled=enabled,
+                        recording_group_id=recording_group_id, yolo_conf=yolo_conf,
+                        min_person_height=min_person_height)
 
 
 class CameraStore:

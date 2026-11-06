@@ -89,6 +89,12 @@ def draw_tracks(frame: np.ndarray, tracks: Iterable[TrackState], camera_name: st
             x, y, conf = ts.kpts[wrist]
             if conf >= KP_CONF:
                 cv2.circle(out, (int(x), int(y)), 4, (0, 0, 255), -1, cv2.LINE_AA)
+        for hand_index, point in enumerate(ts.flow_wrist):
+            if point is not None and now is not None and now - ts.flow_wrist_time <= 0.5:
+                px, py = map(int, point)
+                cv2.circle(out, (px, py), 7, (255, 255, 0), 2, cv2.LINE_AA)
+                cv2.putText(out, "flujo mano", (px + 7, max(12, py - 5)), FONT, 0.32,
+                            (255, 255, 0), 1, cv2.LINE_AA)
         cv2.rectangle(out, (x1, y1), (x2, y2), color, 2)
         if ts.is_staff:
             label = f"ID {ts.track_id} personal (excluido)"

@@ -1,4 +1,4 @@
-# Tukuru MVP - una sola aplicacion Python (CPU, sin GPU)
+# Tukuru MVP - una sola aplicacion Python (CPU por defecto, CUDA opcional)
 numpy
 opencv-python-headless
 ultralytics           # YOLO-pose + tracking (instala torch)

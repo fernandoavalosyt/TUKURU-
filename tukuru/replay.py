@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import hashlib
+import re
 import sys
 import tempfile
 import threading
@@ -35,16 +37,18 @@ from .dashboard import THUMB, render_dashboard
 from .decision import apply_verdict, decide
 from .gemini import GeminiJudge
 from .heuristics import TrackState, update_track
+from .motion import WristMotionTracker
 from .optimizer import FrameOptimizer
 from .render import draw_tracks
 from .vision import PoseTracker, ensure_model
+from .tracker_config import bytetrack_config
 from .zones import ZoneSet
 
 
 def run(video: Path, zones: Optional[dict], fps: float, model: str, out: Optional[Path], settings: Settings,
         max_seconds: Optional[float] = None, dashboard: bool = False, use_gemini: bool = False,
         save_clips: Optional[Path] = None, log=print, object_model: Optional[Path] = None,
-        object_report: Optional[Path] = None) -> List[dict]:
+        object_report: Optional[Path] = None, recording_id: Optional[str] = None) -> List[dict]:
     experiment = None
     if object_model is not None:
         from .objects import ObjectExperiment, SmallDetector
@@ -56,8 +60,16 @@ def run(video: Path, zones: Optional[dict], fps: float, model: str, out: Optiona
         # En el replay el tiempo avanza mas rapido que el reloj real: sin cooldown entre consultas.
         replay_settings = replace(settings, data_dir=Path(tmp), shadow_mode=False, alert_webhook_url=None,
                                   gemini_cooldown=0.0, gemini_enabled=use_gemini and settings.gemini_enabled)
+        if recording_id is None:
+            digest = hashlib.sha256()
+            with video.open("rb") as source_file:
+                for block in iter(lambda: source_file.read(1024 * 1024), b""):
+                    digest.update(block)
+            recording_id = "sha256:" + digest.hexdigest()
+        elif not re.fullmatch(r"[A-Za-z0-9_.:-]{1,80}", recording_id):
+            raise ValueError("recording_id: use letras, numeros, punto, guion o dos puntos")
         timeline = _run(video, zones, fps, model, out, replay_settings, max_seconds, dashboard, use_gemini,
-                        save_clips, log, experiment)
+                        save_clips, log, experiment, recording_id)
     if experiment is not None:
         report = experiment.report()
         report.update(video=str(video), model=str(object_model), timeline=timeline)
@@ -115,14 +127,15 @@ def _review(judge: GeminiJudge, ts: TrackState, now: float, settings: Settings, 
 
 def _run(video: Path, zones: Optional[dict], fps: float, model: str, out: Optional[Path], settings: Settings,
          max_seconds: Optional[float], dashboard: bool, use_gemini: bool, save_clips: Optional[Path],
-         log, experiment=None) -> List[dict]:
+         log, experiment=None, recording_id: Optional[str] = None) -> List[dict]:
     capture = cv2.VideoCapture(str(video))
     if not capture.isOpened():
         raise SystemExit(f"No se pudo abrir {video}")
     src_fps = capture.get(cv2.CAP_PROP_FPS) or 25.0
     stride = max(1, round(src_fps / fps))
     eff_fps = src_fps / stride
-    tracker = PoseTracker(ensure_model(settings.models_dir, model), settings.device, settings.yolo_conf)
+    tracker = PoseTracker(ensure_model(settings.models_dir, model), settings.device, settings.yolo_conf,
+                          settings.max_side, bytetrack_config(settings.data_dir, settings.track_buffer_frames))
     optimizer = FrameOptimizer(settings.max_side)
     alerts = AlertManager(settings)
     judge = GeminiJudge(settings) if use_gemini else None
@@ -132,6 +145,7 @@ def _run(video: Path, zones: Optional[dict], fps: float, model: str, out: Option
     thumbs: Dict[str, np.ndarray] = {}
     zone_set: Optional[ZoneSet] = None
     tracks: Dict[int, TrackState] = {}
+    wrist_motion = WristMotionTracker()
     writer = None
     timeline: List[dict] = []
     last_level: Dict[int, str] = {}
@@ -153,9 +167,12 @@ def _run(video: Path, zones: Optional[dict], fps: float, model: str, out: Option
         if zone_set is None:
             zone_set = ZoneSet(zones, w, h)
         people = [p for p in tracker.infer(small, settings.max_side) if (p.bbox[3] - p.bbox[1]) >= 0.10 * h]
-        # Actualizar todas las poses antes de asociar objetos: permite rechazar propiedad ambigua.
+        # Preparar estados antes del flujo optico; este solo prolonga alcances ya observados.
         for person in people:
-            ts = tracks.setdefault(person.track_id, TrackState(person.track_id, "replay", now, now))
+            tracks.setdefault(person.track_id, TrackState(person.track_id, "replay", now, now))
+        wrist_motion.update(small, people, tracks, zone_set, now)
+        for person in people:
+            ts = tracks[person.track_id]
             update_track(ts, person, zone_set, now, settings)
         if experiment is not None:
             experiment.step(frame, scale, list(tracks.values()), zone_set, now)
@@ -168,7 +185,8 @@ def _run(video: Path, zones: Optional[dict], fps: float, model: str, out: Option
             else:
                 ts.review_event = None                               # sin Gemini: decide el respaldo local
             alerts.evaluate(ts, decide(ts, now, settings), now, video.name,
-                            lambda: draw_tracks(small, list(tracks.values()), video.name, eff_fps, zone_set))
+                            lambda: draw_tracks(small, list(tracks.values()), video.name, eff_fps, zone_set, now=now),
+                            recording_id=recording_id)
             if ts.level != last_level.get(ts.track_id, "ok"):
                 timeline.append({"t": round(now, 2), "id": ts.track_id, "kind": "nivel", "detail": ts.level,
                                  "score": round(ts.score, 2), "reason": ts.level_reason})
@@ -179,7 +197,7 @@ def _run(video: Path, zones: Optional[dict], fps: float, model: str, out: Option
             seen_events[ts.track_id] = len(ts.events)
         if out is not None:
             visible = [t for t in tracks.values() if now - t.last_seen < 0.5]
-            shown = draw_tracks(small, visible, video.name, eff_fps, zone_set)
+            shown = draw_tracks(small, visible, video.name, eff_fps, zone_set, now=now)
             if experiment is not None:
                 shown = experiment.draw(shown)
             if dashboard:
@@ -224,6 +242,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--model", default="yolov8n-pose.pt")
     parser.add_argument("--out", type=Path, help="video anotado de salida (.mp4)")
     parser.add_argument("--max-seconds", type=float)
+    parser.add_argument("--recording-id", help="ID estable opcional para agrupar el mismo origen aunque cambie el archivo")
     parser.add_argument("--dashboard", action="store_true", help="el video sale como el panel web")
     parser.add_argument("--gemini", action="store_true", help="revisar los ocultamientos con Gemini (envia recortes)")
     parser.add_argument("--save-clips", type=Path, help="carpeta donde guardar lo enviado a Gemini y su dictamen")
@@ -238,7 +257,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     load_dotenv(ROOT / ".env", override=False)
     settings = Settings.from_env()
     run(args.video, zones, args.fps, args.model, args.out, settings, args.max_seconds, args.dashboard, args.gemini,
-        args.save_clips, object_model=args.object_model, object_report=args.object_report)
+        args.save_clips, object_model=args.object_model, object_report=args.object_report,
+        recording_id=args.recording_id)
     return 0
 
 

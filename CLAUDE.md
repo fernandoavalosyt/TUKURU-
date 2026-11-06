@@ -6,7 +6,7 @@ Lee esto primero. Detalle en `docs/` (ver "Documentos"). El idioma del proyecto 
 
 Sistema de vision artificial que detecta **robo hormiga** en una tienda de abarrotes (cliente toma un producto del estante, lo oculta en bolsillo/ropa/bolso y sale sin pagar) y emite una alerta con foto de evidencia para que una **persona** la revise. No acusa: señala comportamiento sospechoso.
 
-- Una sola app Python, CPU, sin base de datos ni contenedores. 2 camaras, ampliable a 3 (`MAX_CAMERAS`, tope 4).
+- Una sola app Python, SQLite local para incidentes y sin contenedores. CPU por defecto; CUDA opcional cuando PyTorch la detecta. 2 camaras, ampliable a 3 (`MAX_CAMERAS`, tope 4).
 - Origen: se construyo a partir de **Vigilia** (deteccion de somnolencia en guardias). Todo el concepto de somnolencia fue reemplazado; no queda codigo de ojos/bostezos/postura de sueno. Si ves referencias a "vigilia" o "guardia", son restos y se pueden corregir.
 - Funciona asi: YOLO-pose (persona + 17 puntos + ID) -> heuristica local por mano (alcance -> ocultamiento -> salida) -> **Gemini revisa un clip** solo ante un posible ocultamiento -> decision -> alerta -> panel web.
 
@@ -26,6 +26,7 @@ Con solo la pose **no se ve el producto**. "Meter algo al bolso" y "mirar el cel
 ## Comandos
 
 Entorno nuevo (equipo): `python scripts/preparar_entorno.py --solo-pruebas` (o sin flag para todo). Detalle en `docs/ENTORNO.md`.
+Equipo NVIDIA: `python scripts/preparar_entorno.py --gpu`; `DEVICE=auto` usa CUDA cuando PyTorch la ve.
 
 ```
 pip install -r requirements.txt            # requirements-test.txt si solo vas a correr pruebas
@@ -33,6 +34,8 @@ copy .env.example .env                     # (Windows) y completar GEMINI_API_KE
 python -m tukuru                           # app + panel en http://127.0.0.1:5000
 python -m unittest discover -s tests       # pruebas (unittest, no pytest)
 python -m tukuru.replay VIDEO --zones ZONAS.json --fps 10 --dashboard --out SALIDA.mp4
+DEVICE=cpu GEMINI_ENABLED=false python -m tukuru.replay video/video2.mp4 --zones video/zonas_video2.json --fps 10
+DEVICE=cuda:0 GEMINI_ENABLED=false python -m tukuru.replay video/video2.mp4 --zones video/zonas_video2.json --fps 10
 python -m tukuru.replay ... --gemini --save-clips CARPETA    # revision REAL con Gemini (ver reglas)
 ```
 
@@ -47,12 +50,16 @@ python -m tukuru.replay ... --gemini --save-clips CARPETA    # revision REAL con
 | `credentials.py` | Contrasenas de camaras en el llavero del sistema (`keyring`, opcional) |
 | `zones.py` | `ZoneSet`: poligonos normalizados 0-1 por tipo (`estanteria`, `caja`, `salida`, `personal`) |
 | `camera.py`, `optimizer.py` | Captura RTSP/HTTP con reconexion; reduce a <=640 px, limita fps, modo nocturno |
-| `vision.py` | `PoseTracker` (YOLO-pose + ByteTrack). Indices COCO de munecas/caderas |
+| `vision.py` | `PoseTracker` (YOLO-pose + ByteTrack). Indices COCO de munecas/caderas; tracker configurable |
+| `motion.py` | Flujo optico con validacion para prolongar brevemente una muneca ya detectada |
 | `heuristics.py` | **Nucleo**: `TrackState`, `update_track`, secuencia por mano, puntuacion con decaimiento |
 | `decision.py` | `decide()` (niveles), `apply_verdict()` (aplica dictamen de Gemini) |
 | `gemini.py` | `GeminiJudge`: prompt, esquema `Verdict`, cooldown, tope por hora, reintentos |
+| `zone_suggestions.py` | Propuesta de zonas con una captura enviada a Gemini por accion del operador |
 | `clips.py` | `store_crop` / `select_clip`: recortes por persona y clip que se envia a Gemini |
-| `alerts.py` | `AlertManager`: deduplicacion, evidencia, JSONL, webhook, modo sombra |
+| `alerts.py` | `AlertManager`: deduplicacion, evidencia, JSONL/SQLite, revision humana, alertas resueltas, webhook, modo sombra |
+| `ml/` | Caracteristicas versionadas, incidentes SQLite, exportacion, entrenamiento local y puntuacion en sombra |
+| `telegram.py` | Avisos y botones de revision en un chat autorizado, opcion configurable |
 | `pipeline.py` | Hilo por camara que orquesta todo |
 | `render.py`, `dashboard.py` | Overlay del video en vivo y en replay (zonas, estado por mano, secuencia alcance>oculta>caja>salida) / panel dibujado en OpenCV (solo replay) |
 | `replay.py` | Reproduccion de video con la heuristica (+ Gemini opcional) |
@@ -79,12 +86,22 @@ Flujo y estructuras en `docs/ARQUITECTURA.md`.
 
 ## Trampas conocidas
 
+- Telegram es opcional: requiere token, chat e IDs de operadores en `.env`. `scripts/telegram_ids.py` obtiene los IDs sin imprimir secretos; detener Tukuru antes porque el bot usa `getUpdates`. Las respuestas se guardan en SQLite/JSONL; reconocer o eliminar una alerta no es una etiqueta. Configurarlo envia fotos de evidencia a Telegram cuando haya una alerta de persona.
+- ML inicial: `python -m tukuru.ml.dataset` exporta revisiones; `pip install -r requirements-ml.txt` y `python -m tukuru.ml.train` crean un candidato solo con suficientes sesiones independientes. `ML_SHADOW_MODEL` muestra una puntuacion experimental sin alterar `decide()` ni alertas. No llamar "mejora" al resultado de un video repetido o a un modelo que solo ve alertas.
+- El panel habilita audio tras la primera interaccion del navegador; el boton permite silenciarlo y la preferencia se guarda localmente. Una secuencia anulada se muestra como resuelta, no como falsa alarma etiquetada para ML.
+- El panel puede activar/desactivar Gemini sin reiniciar. Guarda solo `enabled` en `data/gemini_state.json`, que prevalece sobre `GEMINI_ENABLED` al arrancar. Las consultas ya enviadas pueden terminar pero su dictamen se ignora tras apagar. `Sugerir zonas con Gemini` envia una sola captura solo por pulsacion y requiere revision antes de guardar.
+- `TRACK_BUFFER_FRAMES` genera un YAML de ByteTrack privado en `data/trackers/`; el valor por defecto es 60 (~7.5 s a 8 fps). Esto retiene el ID durante oclusiones; no detecta una mano nueva cuando el modelo no produce caja de persona. `WristMotionTracker` solo prolonga por flujo optico una muneca detectada antes del alcance.
+- `WristMotionTracker` prolonga por flujo optico una muneca ya detectada durante un alcance; solo extiende `reach_last` si sigue en estanteria. El punto fluido se dibuja como `flujo mano`; nunca crea por si solo alcance, ocultamiento, puntuacion ni afirmacion de producto. Requiere textura y continuidad; no inicia un seguimiento desde una cabeza/mano que nunca detecto YOLO-pose ni une IDs distintos.
+- `Dibujar zonas con mouse` usa `GET /api/cameras/<id>/zone-frame` y no envia la imagen a Gemini. El SVG permite crear rectangulos y mover poligonos o puntos; el cambio solo se aplica al guardar la camara.
+
 - Entorno de desarrollo (Windows, Git Bash): las descargas de modelos desde GitHub se colgaron; solo existe `models/yolov8n-pose.pt`. No asumas que puedes bajar otros pesos.
 - En Bash, un heredoc con comillas triples `'''` puede romper el comando: escribe un script a un archivo y ejecutalo.
 - Gemini en la cuenta del usuario: `gemini-3.8-flash` (el modelo por defecto) y `3.7`/`flash-latest` dieron 503/timeout; `gemini-2.5-flash` da 404; `gemini-3.6-flash` agoto cuota; `gemini-3-flash-preview` funciono. Usa `GEMINI_MODEL` para cambiarlo y revisa `docs/PRUEBAS.md`.
 - Los modelos 3.x gastan tokens "pensando": `max_output_tokens` bajo corta el JSON.
 - Una persona parada junto al estante tiene una mano "dentro" de la zona por perspectiva: por eso el seguimiento es **por mano** y caminar no cuenta como alcance.
 - Si el seguimiento cambia el ID (oclusion), la secuencia en curso se pierde.
+- `nvidia-smi` visible no basta: si `torch.version.cuda` es `None`, la rueda es solo CPU. En WSL la RTX 4050 Laptop (6 GB, driver 591.66) admite la rueda `cu128`; `scripts/preparar_entorno.py --gpu` la instala cuando la descarga de dependencias termine. La rueda `nvidia-cudnn-cu12` sola supera 600 MB y en esta red se descargaba a ~55 KB/s; la medicion GPU quedo pendiente. El `.env` local puede contener `DEVICE=cpu` y anular el nuevo valor por defecto `auto`; no modificarlo sin indicacion del usuario.
+- Cada camara mantiene su propio YOLO/ByteTrack para conservar IDs independientes. Si CUDA falla, el tracker se reinicia en CPU y se pierden los IDs activos de esa camara.
 
 ## Documentos
 

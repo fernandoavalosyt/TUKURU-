@@ -14,18 +14,21 @@ import numpy as np
 from .alerts import AlertManager
 from .camera import CameraStream
 from .config import CameraConfig, Settings
-from .clips import select_clip, store_crop
+from .clips import select_clip, store_context_frame, store_crop
 from .decision import apply_verdict, decide
 from .gemini import GeminiJudge
 from .heuristics import TrackState, update_track
+from .motion import WristMotionTracker
 from .optimizer import FpsGate, FrameOptimizer
 from .render import draw_tracks, placeholder
 from .vision import Person, PoseTracker
 from .zones import ZoneSet
+from .tracker_config import bytetrack_config
 
 logger = logging.getLogger("tukuru.pipeline")
 
 TRACK_TTL = 10.0              # s sin ver a una persona para olvidar su ID
+DISPLAY_TRACK_MAX_AGE = 1.0   # s: oculta del panel tracks retenidos pero no detectados recientemente
 MIN_PERSON_HEIGHT = 0.10      # fraccion del alto del frame: ignora personas muy lejanas
 REVIEW_GIVE_UP = 45.0         # s esperando cupo de Gemini antes de quedarse con el respaldo local
 
@@ -42,6 +45,7 @@ class CameraPipeline(threading.Thread):
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
         self._tracks: Dict[int, TrackState] = {}
+        self._wrist_motion = WristMotionTracker()
         self._jpeg: Optional[bytes] = None
         self._last_seq = -1
         self._fps_out = 0.0
@@ -63,7 +67,8 @@ class CameraPipeline(threading.Thread):
                 "id": ts.track_id, "level": ts.level, "source": ts.level_source, "staff": ts.is_staff,
                 "reason": ts.level_reason, "seconds_visible": round(now - ts.first_seen),
                 "verdict": ts.verdict, "etapa": ts.stage(now), "manos": ts.hand_states(now), **ts.summary(now),
-            } for ts in sorted(self._tracks.values(), key=lambda t: t.track_id)]
+            } for ts in sorted(self._tracks.values(), key=lambda t: t.track_id)
+                if now - ts.last_seen <= DISPLAY_TRACK_MAX_AGE]
         return {"camera": self.cfg.public(), "stream": self.stream.status(), "fps": round(self._fps_out, 1),
                 "dark_mode": self.optimizer.is_dark, "people": people}
 
@@ -75,7 +80,10 @@ class CameraPipeline(threading.Thread):
     def run(self) -> None:
         self.stream.start()
         try:
-            self.tracker = PoseTracker(self.model_path, self.s.device, self.s.yolo_conf)
+            person_conf = self.cfg.yolo_conf if self.cfg.yolo_conf is not None else self.s.yolo_conf
+            self.tracker = PoseTracker(self.model_path, self.s.device, person_conf,
+                                       self.s.max_side,
+                                       bytetrack_config(self.s.data_dir, self.s.track_buffer_frames))
         except Exception:  # noqa: BLE001
             logger.exception("[%s] no se pudo cargar el modelo", self.cfg.id)
             self.stream.stop()
@@ -96,6 +104,7 @@ class CameraPipeline(threading.Thread):
         if frame is None:
             with self._lock:
                 self._tracks.clear()
+                self._wrist_motion.reset()
             self._publish(placeholder(f"{self.cfg.name}: SIN SENAL"))
             self._stop_event.wait(0.5)
             return
@@ -118,26 +127,45 @@ class CameraPipeline(threading.Thread):
 
         with self._lock:
             seen = set()
+            new_events: Dict[int, list] = {}
             for person in people:
                 ts = self._tracks.get(person.track_id)
                 if ts is None:
                     ts = self._tracks[person.track_id] = TrackState(person.track_id, self.cfg.id, now, now)
                 seen.add(person.track_id)
+            self._wrist_motion.update(small, people, self._tracks, zones, now)
+            for person in people:
+                ts = self._tracks[person.track_id]
+                previous_events = {(event_time, kind) for event_time, kind, _ in ts.events}
                 update_track(ts, person, zones, now, self.s)
+                new_events[person.track_id] = [event for event in ts.events
+                                               if (event[0], event[1]) not in previous_events]
                 self._store_crop(ts, frame, scale, now)
+                store_context_frame(ts, frame, scale, now)
             for track_id in [t for t, ts in self._tracks.items() if now - ts.last_seen > TRACK_TTL]:
                 del self._tracks[track_id]
             tracks = list(self._tracks.values())
+            visible_tracks = [ts for ts in tracks if now - ts.last_seen <= DISPLAY_TRACK_MAX_AGE]
 
             for ts in tracks:
                 if ts.track_id not in seen:
                     continue
                 self._maybe_review(ts, now)
+                decision = decide(ts, now, self.s)
+                # Solo capturamos interacciones que siguen por debajo de una alerta.
+                # Esta muestra queda local para revision y no entra en AlertManager._alerts.
+                if decision[0] in ("ok", "observacion"):
+                    for _, event_kind, _ in new_events.get(ts.track_id, []):
+                        self.alerts.observe_event(ts, event_kind, now, self.cfg.name,
+                                                  recording_id=self.cfg.recording_group_id or None)
                 # La evidencia se dibuja solo si realmente se emite una alerta.
-                self.alerts.evaluate(ts, decide(ts, now, self.s), now, self.cfg.name,
-                                     lambda: draw_tracks(small, tracks, self.cfg.name, self._fps_out, zones))
+                self.alerts.evaluate(ts, decision, now, self.cfg.name,
+                                     lambda: draw_tracks(small, visible_tracks, self.cfg.name, self._fps_out, zones,
+                                                         now=now),
+                                     recording_id=self.cfg.recording_group_id or None)
 
-        self._publish(draw_tracks(small, tracks, self.cfg.name, self._fps_out, zones, self.optimizer.is_dark))
+        self._publish(draw_tracks(small, visible_tracks, self.cfg.name, self._fps_out, zones,
+                                  self.optimizer.is_dark, now=now))
 
     # ---- piezas -------------------------------------------------------------
     def _zones_for(self, w: int, h: int) -> ZoneSet:
@@ -146,11 +174,10 @@ class CameraPipeline(threading.Thread):
         return self._zones
 
     def _accept(self, person: Person, w: int, h: int) -> bool:
-        return (person.bbox[3] - person.bbox[1]) >= MIN_PERSON_HEIGHT * h
+        min_height = self.cfg.min_person_height if self.cfg.min_person_height is not None else MIN_PERSON_HEIGHT
+        return (person.bbox[3] - person.bbox[1]) >= min_height * h
 
     def _store_crop(self, ts: TrackState, frame: np.ndarray, scale: float, now: float) -> None:
-        if self.judge.disabled_reason is not None:  # sin Gemini no hace falta guardar recortes
-            return
         store_crop(ts, frame, scale, now, self.s.gemini_crop_side,
                    self.optimizer.enhance if self.optimizer.is_dark else None)
 

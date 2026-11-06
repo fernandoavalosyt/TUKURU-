@@ -8,10 +8,10 @@ Reglas, en orden (sobre los ocultamientos que Gemini no ha descartado):
  2. Dictamen de Gemini que confirma ocultamiento (conf >= MIN_CONF_CONFIRM):
       posible_ocultamiento, o probable_sustraccion si la persona ya salio.
     (Si Gemini lo descarta, el pipeline anula el evento y no llega aqui.)
- 3. Revision de Gemini en curso: se mantiene el nivel actual, sin escalar a ciegas.
- 4. Respaldo local (Gemini apagado, sin cuota, indeterminado o con error): la puntuacion
-    debe superar un umbral mas alto. Haber pasado por caja evita el nivel "probable"
-    sin confirmacion, porque la pose sola no distingue lo que se pago.
+ 3. Respaldo local preventivo aun mientras Gemini revisa: puntuacion alta o una secuencia
+    sostenida de alcance y mano hacia bolsillo, pecho o cintura sin devolucion observada.
+ 4. Sin evidencia suficiente, solo observacion. Haber pasado por caja evita el nivel
+    "probable" local porque la pose sola no distingue lo que se pago.
 """
 
 from __future__ import annotations
@@ -19,11 +19,13 @@ from __future__ import annotations
 from typing import Any, Dict, Tuple
 
 from .config import Settings
-from .heuristics import TrackState, clear_through
+from .heuristics import POST_CONCEAL_REVIEW_DELAY, TrackState, clear_through
 
 LEVEL_RANK = {"ok": 0, "observacion": 1, "posible_ocultamiento": 2, "probable_sustraccion": 3}
 ALERT_MIN_RANK = LEVEL_RANK["posible_ocultamiento"]
-PLACE_TEXT = {"bolsillo": "el bolsillo", "pecho_o_abdomen": "el pecho o abdomen", "mano_oculta": "el cuerpo (mano oculta)"}
+PLACE_TEXT = {"bolsillo": "el bolsillo", "pecho_o_abdomen": "el pecho o abdomen",
+              "manos_a_la_cintura": "la cintura (posible bolso)", "mano_oculta": "el cuerpo (mano oculta)"}
+EARLY_PLACES = {"bolsillo", "pecho_o_abdomen", "manos_a_la_cintura"}
 
 
 def decide(ts: TrackState, now: float, s: Settings) -> Tuple[str, str, str]:
@@ -45,17 +47,19 @@ def decide(ts: TrackState, now: float, s: Settings) -> Tuple[str, str, str]:
             return "probable_sustraccion", "gemini", f"{verdict['reasoning']} Salio sin devolver el producto."
         return "posible_ocultamiento", "gemini", verdict["reasoning"]
 
-    if ts.review_pending or ts.review_event is not None:
-        held = ts.level if ts.level in LEVEL_RANK else "ok"
-        return (held, ts.level_source, ts.level_reason) if LEVEL_RANK[held] > 1 \
-            else ("observacion", "local", "Verificando posible ocultamiento")
-
     place = PLACE_TEXT.get(ts.conceal_place, "el cuerpo")
     if exited and ts.paid_at is None and ts.score >= s.local_probable_score:
         return "probable_sustraccion", "local", f"Tomo del estante, llevo la mano hacia {place} y salio sin pasar por caja"
     if ts.score >= s.local_possible_score:
         times = "1 vez" if len(active) == 1 else f"{len(active)} veces"
         return "posible_ocultamiento", "local", f"Tomo del estante y llevo la mano hacia {place} ({times})"
+    # Un solo ocultamiento cerca de ropa/bolso merece revision preventiva si no se observo
+    # devolucion durante el retraso de revision. No incluye la perdida aislada de una muneca.
+    if (ts.conceal_place in EARLY_PLACES and now - active[-1] >= POST_CONCEAL_REVIEW_DELAY
+            and ts.score >= 0.50):
+        return "posible_ocultamiento", "local", f"Mano del estante hacia {place}; revisar posible ocultamiento"
+    if ts.review_pending or ts.review_event is not None:
+        return "observacion", "local", "Verificando posible ocultamiento"
     return "observacion", "local", "Posible ocultamiento sin confirmar"
 
 

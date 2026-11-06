@@ -173,6 +173,9 @@ class HandState:
     reach_pos: Optional[np.ndarray] = None
     checked: bool = False             # ya se evaluo si este alcance es una devolucion
     armed_until: float = 0.0          # hasta cuando un ocultamiento cuenta como posterior a un alcance
+    pending_reach_at: Optional[float] = None
+    pending_reach_pos: Optional[np.ndarray] = None
+    returning_pending: bool = False
 
 
 @dataclass
@@ -183,6 +186,8 @@ class TrackState:
     last_seen: float
     bbox: np.ndarray = field(default_factory=lambda: np.zeros(4))
     kpts: np.ndarray = field(default_factory=lambda: np.zeros((17, 3)))
+    flow_wrist: List[Optional[np.ndarray]] = field(default_factory=lambda: [None, None])
+    flow_wrist_time: float = 0.0
     updated: bool = False
     is_staff: bool = False
     # secuencia de robo (por mano: 0 = izquierda, 1 = derecha)
@@ -197,6 +202,7 @@ class TrackState:
     staff_timer: Sustain = field(default_factory=lambda: Sustain(1.0))
     paid_at: Optional[float] = None
     exit_time: Optional[float] = None
+    unreturned_reach_exit: bool = False
     reaches: Deque[float] = field(default_factory=lambda: deque(maxlen=50))
     conceals: Deque[float] = field(default_factory=lambda: deque(maxlen=20))
     conceal_place: str = ""
@@ -218,7 +224,10 @@ class TrackState:
     verdict_event: Optional[float] = None
     # recortes JPEG recientes para Gemini: (timestamp, bytes)
     crops: Deque[Tuple[float, bytes]] = field(default_factory=lambda: deque(maxlen=40))
+    # Cuadros amplios de la escena para evidencia/Telegram, separados de Gemini.
+    context_crops: Deque[Tuple[float, bytes]] = field(default_factory=lambda: deque(maxlen=20))
     last_crop_time: float = 0.0
+    last_context_crop_time: float = 0.0
     # decision final / alertas
     level: str = "ok"
     level_source: str = ""
@@ -336,12 +345,17 @@ def update_track(ts: TrackState, person: Person, zones: ZoneSet, now: float, s: 
         if info.in_shelf:
             if hand.reach_start is None:
                 hand.reach_start, hand.reach_pos, hand.checked = now, info.pos, False
+                hand.returning_pending = False
             hand.reach_last = now
             held = now - hand.reach_start
             if held > REACH_MAX_SECONDS:
                 hand.armed_until = 0.0
             elif held >= REACH_MIN_SECONDS:
                 hand.armed_until = now + s.conceal_window
+                if (hand.pending_reach_at is not None and hand.pending_reach_pos is not None and info.pos is not None
+                        and float(np.linalg.norm(info.pos - hand.pending_reach_pos)) <= RETURN_SAME_SPOT * body.scale):
+                    hand.pending_reach_at = hand.pending_reach_pos = None
+                    hand.returning_pending = True
                 if not hand.checked:
                     hand.checked = True
                     _check_return(ts, hand, body, now, s)
@@ -352,6 +366,10 @@ def update_track(ts: TrackState, person: Person, zones: ZoneSet, now: float, s: 
                 ts.reaches.append(hand.reach_last)
                 _add(ts, hand.reach_last, "alcance", W_REACH)
                 _count_scan(ts, now)
+                if not hand.returning_pending:
+                    hand.pending_reach_at = hand.reach_last
+                    hand.pending_reach_pos = hand.reach_pos.copy() if hand.reach_pos is not None else None
+            hand.returning_pending = False
 
     # 2) Ocultamiento: tras un alcance, esa mano queda junto al cuerpo (bolsillo/bolso/pecho),
     #    o las dos manos se juntan a la cintura.
@@ -381,6 +399,10 @@ def update_track(ts: TrackState, person: Person, zones: ZoneSet, now: float, s: 
         ts.exit_time = now
         if ts.active_conceals():
             _add(ts, now, "salida", W_EXIT)
+        elif ts.paid_at is None and any(
+                hand.pending_reach_at is not None and now - hand.pending_reach_at <= s.conceal_window
+                for hand in ts.hands):
+            ts.unreturned_reach_exit = True
 
     while ts.events and now - ts.events[0][0] > EVENT_KEEP:
         ts.events.popleft()

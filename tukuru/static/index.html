@@ -3,132 +3,223 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Panel de monitoreo y prevencion de perdidas - Tukuru">
+<meta name="theme-color" content="#161b22">
 <title>Tukuru | Monitoreo</title>
 <style>
-  :root { --bg:#0f1419; --card:#1a2129; --line:#2a3440; --txt:#e6edf3; --mut:#8b98a5; --ok:#3fb950; --warn:#f0a020; --bad:#f85149; --acc:#4493f8; }
-  * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--txt); font:14px/1.45 system-ui, "Segoe UI", sans-serif; }
-  header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; padding:12px 16px; border-bottom:1px solid var(--line); }
-  h1 { font-size:18px; margin:0; } h2 { font-size:15px; margin:0 0 8px; }
-  .pill { padding:2px 10px; border-radius:99px; background:var(--card); border:1px solid var(--line); color:var(--mut); font-size:12px; }
-  .pill.ok { color:var(--ok); } .pill.warn { color:var(--warn); } .pill.bad { color:var(--bad); }
-  main { padding:16px; display:grid; gap:16px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px; min-width:0; }
-  .wide { grid-column: 1 / -1; }
-  img.video { width:100%; border-radius:6px; background:#000; display:block; }
-  table { width:100%; border-collapse:collapse; font-size:13px; }
-  th, td { text-align:left; padding:5px 6px; border-bottom:1px solid var(--line); }
-  th { color:var(--mut); font-weight:500; }
-  .lvl-ok { color:var(--ok); } .lvl-observacion { color:var(--mut); } .lvl-posible_ocultamiento { color:var(--warn); font-weight:600; } .lvl-probable_sustraccion { color:var(--bad); font-weight:700; }
-  .alert { display:flex; gap:10px; padding:8px; border:1px solid var(--line); border-left-width:4px; border-radius:6px; margin-bottom:8px; }
-  .alert.probable_sustraccion { border-left-color:var(--bad); } .alert.posible_ocultamiento { border-left-color:var(--warn); }
-  .alert.sistema { border-left-color:var(--acc); }
-  .alert img { width:96px; height:64px; object-fit:cover; border-radius:4px; }
-  .alert .meta { color:var(--mut); font-size:12px; }
-  .alert.acked { opacity:.55; }
-  form { display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap:8px; }
-  label { display:flex; flex-direction:column; font-size:12px; color:var(--mut); gap:3px; }
-  input, select, textarea { background:var(--bg); color:var(--txt); border:1px solid var(--line); border-radius:5px; padding:6px 8px; font:inherit; }
-  button { background:var(--acc); color:#fff; border:0; border-radius:5px; padding:7px 12px; font:inherit; cursor:pointer; }
-  button.sec { background:var(--card); border:1px solid var(--line); color:var(--txt); }
-  button.del { background:var(--bad); }
-  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-  .msg { font-size:13px; } .msg.ok { color:var(--ok); } .msg.bad { color:var(--bad); }
-  .empty { color:var(--mut); }
-  /* Distribucion: monitoreo primero, administracion en una vista independiente. */
-  :root { --bg:#10151c; --card:#181f28; --line:#2b3542; --mut:#a0adbc; --acc:#5b9bf5; }
-  body { font-size:14px; }
-  header { justify-content:space-between; padding:16px 28px; background:#141b24; }
-  .brand { display:flex; align-items:center; gap:12px; }
-  .brand-mark { display:grid; place-items:center; width:36px; height:36px; border-radius:10px; background:#223957; color:#9ec5ff; font-weight:750; }
-  .brand p { margin:0; font-size:12px; color:var(--mut); }
-  h1 { font-size:19px; letter-spacing:-.5px; } h2 { font-size:16px; margin:0; }
-  nav { display:flex; gap:6px; padding:0 28px; border-bottom:1px solid var(--line); background:#141b24; }
-  .tab { background:transparent; border-radius:0; border-bottom:2px solid transparent; padding:13px 16px; color:var(--mut); }
-  .tab[aria-pressed=true] { color:var(--txt); border-bottom-color:var(--acc); }
-  main { display:block; max-width:1600px; margin:auto; padding:24px 28px; }
-  [hidden] { display:none !important; }
-  .page-heading { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:18px; }
-  .page-heading p,.section-heading p { margin:4px 0 0; color:var(--mut); font-size:13px; }
-  .summary-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-bottom:20px; }
-  .summary-card { padding:15px 18px; background:var(--card); border:1px solid var(--line); border-radius:10px; }
-  .summary-card span { color:var(--mut); font-size:12px; display:block; }
-  .summary-card strong { font-size:25px; font-weight:650; display:block; margin-top:3px; }
-  .monitor-grid { display:grid; grid-template-columns:minmax(0,1fr) 370px; gap:18px; align-items:start; }
-  .monitor-primary { display:grid; gap:18px; min-width:0; }
-  .card { padding:18px; border-radius:10px; }
-  .section-heading { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:16px; }
-  .camera-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
-  .camera-grid.single { grid-template-columns:1fr; }
-  .camera-box { overflow:hidden; border:1px solid var(--line); border-radius:8px; background:#10151c; }
-  .camera-title { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:10px 12px; }
-  .camera-title strong { font-size:13px; }
-  .camera-detail { color:var(--mut); padding:8px 12px; font-size:12px; }
-  img.video { border-radius:0; aspect-ratio:16/9; object-fit:contain; }
-  .video-offline { min-height:150px; display:grid; place-items:center; color:var(--mut); background:#0c1016; }
-  .pill { display:inline-block; white-space:normal; }
-  #gem { max-width:310px; }
-  .connection { font-size:12px; color:var(--mut); }
-  .empty { padding:28px 12px; text-align:center; border:1px dashed var(--line); border-radius:8px; }
-  .alert-toolbar { display:flex; gap:8px; margin-bottom:14px; }
-  .alert-toolbar select { flex:1; min-width:0; }
-  .alert-list { max-height:760px; overflow:auto; }
-  .alert { display:block; padding:14px; margin-bottom:10px; background:#141b23; }
-  .alert.acked { opacity:1; }
-  .alert.acked .alert-heading { color:var(--mut); }
-  .alert-heading { font-size:12px; font-weight:650; }
-  .alert-content { display:flex; gap:10px; margin:10px 0; align-items:start; }
-  .alert .meta,.meta { font-size:12px; color:var(--mut); overflow-wrap:anywhere; }
-  .alert p { margin:0 0 6px; font-size:13px; }
-  .evidence-button { background:transparent; padding:0; flex-shrink:0; border-radius:5px; }
-  .alert img { display:block; width:78px; height:65px; }
-  .alert-actions { display:flex; gap:8px; justify-content:flex-end; align-items:center; }
-  button { min-height:36px; border-radius:6px; font-size:13px; font-weight:550; }
-  button.del { background:transparent; color:#ffaaa5; border:1px solid #653b3e; }
-  button:disabled { opacity:.5; cursor:wait; }
-  button:hover:not(:disabled) { filter:brightness(1.15); }
-  button:focus-visible,summary:focus-visible,a:focus-visible { outline:2px solid var(--acc); outline-offset:3px; }
-  input,select,textarea { min-height:36px; border-radius:6px; }
-  input:focus,select:focus,textarea:focus { outline:2px solid var(--acc); outline-offset:1px; }
-  .table-wrap { overflow-x:auto; }
-  th,td { padding:11px 8px; vertical-align:top; }
-  th { font-size:12px; white-space:nowrap; }
-  td { font-size:13px; }
-  .person-details { margin-top:5px; font-size:12px; color:var(--mut); }
-  summary { cursor:pointer; }
-  .person-details p { margin:7px 0; max-width:400px; }
-  .config-grid { display:grid; grid-template-columns:minmax(0,1.25fr) minmax(0,1fr); gap:18px; align-items:start; }
-  form { grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
-  .span-all { grid-column:1/-1; }
-  .form-section { grid-column:1/-1; margin:6px 0 0; font-size:12px; color:var(--mut); text-transform:uppercase; letter-spacing:.8px; }
-  .check-label { flex-direction:row; align-items:center; gap:8px; }
-  .check-label input { min-height:auto; }
-  .advanced { border-top:1px solid var(--line); padding-top:14px; }
-  .advanced-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin-top:14px; }
-  .form-actions { margin-top:20px; padding-top:16px; border-top:1px solid var(--line); }
-  #camMsg { display:block; margin-top:12px; }
-  .camera-list-item { padding:14px 0; border-bottom:1px solid var(--line); }
-  .camera-list-item:first-child { padding-top:0; }
-  .camera-list-item .row { margin-top:10px; }
-  .camera-list-item .meta { margin:7px 0; }
-  #credInfo { margin-top:16px; }
-  .notice { padding:10px 14px; margin-bottom:16px; border:1px solid #68432e; border-radius:7px; color:#ffd0a6; }
-  dialog { width:min(1000px,94vw); max-height:92vh; padding:18px; border:1px solid var(--line); border-radius:10px; background:var(--card); color:var(--txt); }
-  dialog::backdrop { background:#000b; }
-  dialog img { display:block; width:100%; max-height:74vh; object-fit:contain; margin-top:14px; }
-  @media(min-width:1450px) { .monitor-grid { grid-template-columns:minmax(0,1fr) 400px; } }
-  @media(max-width:1050px) { .monitor-grid,.config-grid { grid-template-columns:1fr; } .alert-list { max-height:550px; } }
-  @media(max-width:620px) { header { padding:14px 16px; } nav { padding:0 16px; } main { padding:18px 12px; } .camera-grid,form,.advanced-fields { grid-template-columns:1fr; } .summary-grid { gap:8px; } .summary-card { padding:12px 10px; } .summary-card strong { font-size:22px; } .card { padding:14px; } #gem { max-width:100%; } .header-actions { width:100%; } }
+/* ===== Variables ===== */
+:root {
+  --bg:#0d1117; --bg-2:#090d12;
+  --surface:#161b22; --surface-2:#1c2330; --surface-3:#22293a;
+  --border:#21262d; --border-2:#30363d;
+  --txt:#e6edf3; --txt-2:#8b949e; --txt-3:#6e7681;
+  --ok:#3fb950; --ok-bg:rgba(63,185,80,.1);
+  --warn:#d29922; --warn-bg:rgba(210,153,34,.1);
+  --bad:#f85149; --bad-bg:rgba(248,81,73,.1);
+  --acc:#58a6ff; --acc-bg:rgba(88,166,255,.1);
+  --anulada:#40c0cb; --anulada-bg:rgba(64,192,203,.08);
+  --r-xs:4px; --r-sm:6px; --r:10px; --r-lg:12px;
+}
+/* ===== Base ===== */
+*,*::before,*::after { box-sizing:border-box }
+body { margin:0; background:var(--bg); color:var(--txt); font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif; -webkit-font-smoothing:antialiased }
+h1,h2,h3 { margin:0; line-height:1.2; letter-spacing:-.3px }
+h1 { font-size:17px; font-weight:650 } h2 { font-size:15px; font-weight:600 } h3 { font-size:13px; font-weight:600; margin-bottom:10px }
+p { margin:0 0 6px }
+[hidden] { display:none !important }
+table { width:100%; border-collapse:collapse }
+summary { cursor:pointer; list-style:none }
+summary::-webkit-details-marker { display:none }
+:focus-visible { outline:2px solid var(--acc); outline-offset:2px }
+::-webkit-scrollbar { width:4px; height:4px }
+::-webkit-scrollbar-track { background:transparent }
+::-webkit-scrollbar-thumb { background:var(--border-2); border-radius:99px }
+/* Ambient top glow */
+body::before { content:''; position:fixed; inset:0; background:radial-gradient(ellipse 100% 35% at 50% 0%,rgba(88,166,255,.06) 0%,transparent 65%); pointer-events:none; z-index:0 }
+/* ===== Header ===== */
+header { position:relative; z-index:10; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; padding:14px 28px; background:var(--surface); border-bottom:1px solid var(--border) }
+.brand { display:flex; align-items:center; gap:11px }
+.brand-mark { display:grid; place-items:center; width:34px; height:34px; border-radius:9px; background:linear-gradient(145deg,#1a4080 0%,#2563c0 100%); color:#d4e8ff; font-size:15px; font-weight:800; letter-spacing:-.5px; box-shadow:0 2px 8px rgba(37,99,192,.35),inset 0 1px 0 rgba(255,255,255,.15) }
+.brand p { margin:2px 0 0; font-size:11px; color:var(--txt-3); letter-spacing:.2px }
+.header-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap }
+.hdr-divider { width:1px; height:20px; background:var(--border-2); flex-shrink:0 }
+/* ===== Navigation ===== */
+nav { position:relative; z-index:10; display:flex; gap:2px; padding:0 28px; background:var(--surface); border-bottom:1px solid var(--border) }
+.tab { background:transparent; border:0; border-bottom:2px solid transparent; border-radius:0; padding:11px 16px 10px; color:var(--txt-2); font:inherit; font-size:13px; font-weight:500; cursor:pointer; min-height:auto; transition:color 150ms,border-color 150ms }
+.tab:hover:not([aria-pressed=true]) { color:var(--txt); transform:none; box-shadow:none; filter:none }
+.tab[aria-pressed=true] { color:var(--txt); border-bottom-color:var(--acc) }
+/* ===== Layout ===== */
+main { position:relative; z-index:1; display:block; max-width:1600px; margin:auto; padding:24px 28px }
+.row { display:flex; gap:8px; flex-wrap:wrap; align-items:center }
+.page-heading { display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:20px }
+.page-heading p,.section-heading p { margin:4px 0 0; color:var(--txt-2); font-size:12px }
+.section-heading { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:16px }
+/* ===== Cards ===== */
+.card { background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg); padding:20px; min-width:0 }
+.wide { grid-column:1/-1 }
+/* ===== Summary grid ===== */
+.summary-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-bottom:20px }
+.summary-card { padding:18px 20px; background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg); transition:border-color 180ms,background 180ms }
+.summary-card:hover { border-color:var(--border-2); background:var(--surface-2) }
+.summary-card span { display:block; color:var(--txt-2); font-size:11px; font-weight:500; letter-spacing:.5px; text-transform:uppercase; margin-bottom:8px }
+.summary-card strong { display:block; font-size:30px; font-weight:700; letter-spacing:-1.5px; font-variant-numeric:tabular-nums; line-height:1 }
+/* ===== Monitor grid ===== */
+.monitor-grid { display:grid; grid-template-columns:minmax(0,1fr) 380px; gap:20px; align-items:start }
+.monitor-primary { display:grid; gap:20px; min-width:0 }
+.review-layout { display:grid; grid-template-columns:minmax(0,1fr) 300px; gap:16px; align-items:start }
+.review-main,.review-side { display:grid; gap:16px; min-width:0 }
+.review-step { display:flex; gap:12px; align-items:flex-start; padding:12px 0; border-bottom:1px solid var(--border) }
+.review-step:last-child { border-bottom:0; padding-bottom:0 }
+.review-step b { display:grid; place-items:center; flex:0 0 26px; height:26px; border-radius:50%; background:var(--acc-bg); color:var(--acc); font-size:12px }
+.review-step p { margin:0; color:var(--txt-2); font-size:12px }
+.review-step strong { display:block; color:var(--txt); margin-bottom:2px }
+.review-toolbar { display:flex; flex-wrap:wrap; gap:8px; align-items:center }
+.review-toolbar input { flex:1 1 220px }
+/* ===== Pills ===== */
+.pill { display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:99px; font-size:11px; font-weight:500; white-space:nowrap; background:var(--surface-2); border:1px solid var(--border-2); color:var(--txt-2) }
+.pill.ok   { color:var(--ok);   border-color:rgba(63,185,80,.25);  background:var(--ok-bg) }
+.pill.warn { color:var(--warn); border-color:rgba(210,153,34,.25); background:var(--warn-bg) }
+.pill.bad  { color:var(--bad);  border-color:rgba(248,81,73,.25);  background:var(--bad-bg) }
+.pill.ok::before { content:''; display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--ok); flex-shrink:0; animation:live-pulse 2.4s ease-in-out infinite }
+@keyframes live-pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(.75)} }
+#gem { max-width:300px }
+/* ===== Camera grid ===== */
+.camera-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px }
+.camera-grid.single { grid-template-columns:1fr }
+.camera-box { overflow:hidden; border:1px solid var(--border); border-radius:var(--r); background:var(--bg-2); transition:border-color 200ms }
+.camera-box:hover { border-color:var(--border-2) }
+.camera-title { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:9px 12px; border-bottom:1px solid var(--border) }
+.camera-title strong { font-size:12px; font-weight:600 }
+.camera-detail { color:var(--txt-3); padding:5px 12px 8px; font-size:11px }
+img.video { display:block; width:100%; border-radius:0; aspect-ratio:16/9; object-fit:contain; background:#000 }
+.video-offline { min-height:120px; display:grid; place-items:center; color:var(--txt-3); background:var(--bg-2); font-size:12px }
+.connection { font-size:12px; color:var(--txt-3) }
+/* ===== Buttons ===== */
+button { display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:34px; padding:6px 14px; background:var(--acc); color:#fff; border:0; border-radius:var(--r-sm); font:inherit; font-size:13px; font-weight:550; cursor:pointer; white-space:nowrap; transition:filter 130ms,transform 100ms,box-shadow 130ms }
+button:hover:not(:disabled) { filter:brightness(1.12); transform:translateY(-1px); box-shadow:0 3px 10px rgba(0,0,0,.3) }
+button:active:not(:disabled) { transform:translateY(0); box-shadow:none; filter:brightness(1.05) }
+button:disabled { opacity:.4; cursor:not-allowed }
+button.sec { background:var(--surface-2); border:1px solid var(--border-2); color:var(--txt) }
+button.sec:hover:not(:disabled) { background:var(--surface-3); border-color:var(--border-2); filter:none }
+button.del { background:transparent; color:var(--bad); border:1px solid rgba(248,81,73,.3) }
+button.del:hover:not(:disabled) { background:var(--bad-bg); border-color:rgba(248,81,73,.5); filter:none }
+/* ===== Forms ===== */
+form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px }
+label { display:flex; flex-direction:column; font-size:12px; color:var(--txt-2); gap:5px; font-weight:500 }
+label > span { font-weight:400; color:var(--txt-3); margin-top:1px }
+input,select,textarea { background:var(--bg); color:var(--txt); border:1px solid var(--border-2); border-radius:var(--r-sm); padding:7px 10px; font:inherit; font-size:13px; min-height:36px; transition:border-color 150ms,box-shadow 150ms }
+input:focus,select:focus,textarea:focus { outline:none; border-color:var(--acc); box-shadow:0 0 0 3px rgba(88,166,255,.18) }
+input::placeholder { color:var(--txt-3) }
+.span-all { grid-column:1/-1 }
+.form-section { grid-column:1/-1; margin:8px 0 0; font-size:11px; color:var(--txt-3); text-transform:uppercase; letter-spacing:.7px; font-weight:600; padding-bottom:8px; border-bottom:1px solid var(--border) }
+.check-label { flex-direction:row; align-items:center; gap:8px; color:var(--txt); cursor:pointer }
+.check-label input { min-height:auto; width:15px; height:15px; cursor:pointer }
+.advanced { border-top:1px solid var(--border); padding-top:14px; margin-top:2px }
+.advanced-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin-top:14px }
+.form-actions { margin-top:20px; padding-top:16px; border-top:1px solid var(--border) }
+/* ===== Feedback ===== */
+.msg { font-size:12px } .msg.ok { color:var(--ok) } .msg.bad { color:var(--bad) }
+#camMsg { display:block; margin-top:12px }
+/* ===== People table ===== */
+.table-wrap { overflow-x:auto }
+th,td { text-align:left; padding:10px; border-bottom:1px solid var(--border); vertical-align:top }
+th { font-size:11px; color:var(--txt-2); font-weight:600; letter-spacing:.3px; white-space:nowrap; text-transform:uppercase }
+td { font-size:13px }
+tbody tr { transition:background 120ms }
+tbody tr:hover { background:var(--surface-2) }
+tbody tr:last-child td { border-bottom:none }
+.person-details { margin-top:5px; font-size:12px; color:var(--txt-2) }
+.person-details p { margin:7px 0; max-width:420px }
+details.person-details > summary { display:inline-flex; align-items:center; gap:4px; color:var(--acc); font-size:12px; font-weight:500; transition:color 120ms }
+details.person-details > summary::before { content:'▸'; font-size:9px; display:inline-block; transition:transform 150ms; line-height:1 }
+details.person-details[open] > summary::before { transform:rotate(90deg) }
+details.person-details > summary:hover { color:var(--txt) }
+/* ===== Level colors ===== */
+.lvl-ok { color:var(--ok) } .lvl-observacion { color:var(--txt-3) }
+.lvl-posible_ocultamiento { color:var(--warn); font-weight:600 }
+.lvl-probable_sustraccion { color:var(--bad); font-weight:700 }
+/* ===== Alerts ===== */
+.alert-toolbar { display:flex; gap:8px; margin-bottom:14px; align-items:center }
+.alert-toolbar select { flex:1; min-width:0 }
+.alert-list { max-height:760px; overflow:auto; padding-right:2px }
+.review-help { margin:0 0 14px; padding:10px 14px; color:var(--txt-2); background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-sm); font-size:12px; line-height:1.55 }
+.alert { display:block; padding:14px; margin-bottom:8px; background:var(--surface-2); border:1px solid var(--border); border-left:3px solid var(--border-2); border-radius:var(--r); transition:background 150ms }
+.alert:hover { background:var(--surface-3) }
+.alert.probable_sustraccion { border-left-color:var(--bad) }
+.alert.posible_ocultamiento { border-left-color:var(--warn) }
+.alert.sistema { border-left-color:var(--acc) }
+.alert.acked { opacity:.6 }
+.alert.acked .alert-heading { color:var(--txt-3) }
+.alert.resolved { border-left-color:var(--anulada); background:var(--anulada-bg) }
+.alert.resolved:hover { background:rgba(64,192,203,.12) }
+.alert.resolved .alert-heading { color:var(--anulada) }
+.alert-heading { font-size:11px; font-weight:700; letter-spacing:.5px; text-transform:uppercase; margin-bottom:2px }
+.alert-content { display:flex; gap:12px; margin:10px 0 8px; align-items:flex-start }
+.alert .meta,.meta { font-size:12px; color:var(--txt-2); overflow-wrap:anywhere }
+.alert p { margin:0 0 4px; font-size:13px }
+.evidence-button { background:transparent; padding:0; flex-shrink:0; border-radius:var(--r-sm); min-height:auto; transition:transform 150ms }
+.evidence-button:hover:not(:disabled) { transform:scale(1.04); filter:none; box-shadow:none }
+.alert img { display:block; width:80px; height:60px; object-fit:cover; border-radius:var(--r-sm) }
+.alert-actions { display:flex; flex-wrap:wrap; gap:6px; justify-content:flex-end; align-items:center; margin-top:10px; padding-top:10px; border-top:1px solid var(--border) }
+/* ===== Empty states ===== */
+.empty { padding:32px 16px; text-align:center; color:var(--txt-2); font-size:13px; border:1px dashed var(--border-2); border-radius:var(--r) }
+/* ===== Notice ===== */
+.notice { padding:10px 16px; margin-bottom:16px; border:1px solid rgba(201,117,67,.3); border-radius:var(--r-sm); background:rgba(61,34,16,.85); color:#ffd0a6; font-size:13px }
+/* ===== Dialog ===== */
+dialog { width:min(1000px,94vw); max-height:92vh; padding:20px; border:1px solid var(--border-2); border-radius:var(--r-lg); background:var(--surface); color:var(--txt); box-shadow:0 20px 60px rgba(0,0,0,.6) }
+dialog::backdrop { background:rgba(0,0,0,.72); backdrop-filter:blur(3px) }
+dialog img { display:block; width:100%; max-height:74vh; object-fit:contain; margin-top:14px; border-radius:var(--r-sm) }
+/* ===== Config ===== */
+.config-grid { display:grid; grid-template-columns:minmax(0,1.3fr) minmax(0,1fr); gap:20px; align-items:start }
+.camera-list-item { padding:14px 0; border-bottom:1px solid var(--border) }
+.camera-list-item:first-child { padding-top:0 }
+.camera-list-item:last-child { border-bottom:none; padding-bottom:0 }
+.camera-list-item .row { margin-top:10px }
+.camera-list-item .meta { margin:5px 0 }
+#credInfo { margin-top:16px }
+/* ===== Zone editor ===== */
+.zone-preview { position:relative; width:100%; margin:0; overflow:hidden; border-radius:var(--r-sm) }
+.zone-preview img { display:block; width:100% }
+.zone-preview svg { position:absolute; inset:0; width:100%; height:100%; touch-action:none; cursor:crosshair }
+.zone-workspace { display:grid; grid-template-columns:minmax(0,1fr) minmax(210px,280px); gap:16px; align-items:start; margin-top:16px }
+.zone-stage { min-width:0; padding:14px; border:1px solid var(--border); border-radius:var(--r); background:var(--bg-2) }
+.zone-toolbar { display:flex; align-items:flex-end; gap:8px; flex-wrap:wrap; margin-bottom:12px }
+.zone-toolbar label { min-width:170px }
+.zone-side { display:grid; gap:12px }
+.zone-legend,.zone-list { padding:14px; border:1px solid var(--border); border-radius:var(--r); background:var(--surface-2) }
+.zone-legend-items { display:grid; gap:8px }
+.zone-legend-item { display:flex; gap:8px; align-items:center; color:var(--txt-2); font-size:12px }
+.zone-swatch { width:10px; height:10px; border-radius:2px; border:1px solid currentColor; flex:0 0 auto }
+.zone-items { display:grid; gap:6px }
+.zone-item { display:flex; width:100%; min-height:36px; justify-content:space-between; gap:8px; align-items:center; text-align:left; padding:7px 10px; background:transparent; border:1px solid var(--border); border-radius:var(--r-sm); color:var(--txt); transition:background 120ms,border-color 120ms }
+.zone-item:hover:not(:disabled) { background:var(--surface-3); border-color:var(--border-2); transform:none; box-shadow:none; filter:none }
+.zone-item[aria-pressed=true] { border-color:var(--acc); background:var(--acc-bg) }
+.zone-item-name { display:flex; align-items:center; gap:7px }
+.zone-empty { color:var(--txt-3); font-size:12px; margin:0 }
+#zoneNotes { margin:0 }
+/* ===== Responsive ===== */
+@media(min-width:1450px) { .monitor-grid { grid-template-columns:minmax(0,1fr) 420px } }
+@media(max-width:1050px) { .monitor-grid,.config-grid { grid-template-columns:1fr } .alert-list { max-height:500px } }
+@media(max-width:900px) { .review-layout { grid-template-columns:1fr } }
+@media(max-width:780px) { .zone-workspace { grid-template-columns:1fr } }
+@media(max-width:620px) {
+  header { padding:12px 16px } nav { padding:0 16px } main { padding:16px }
+  .camera-grid,form,.advanced-fields { grid-template-columns:1fr }
+  .summary-grid { gap:8px } .summary-card { padding:14px 16px } .summary-card strong { font-size:26px }
+  .card { padding:16px } #gem { max-width:100% } .header-actions { width:100% }
+  .hdr-divider { display:none } .monitor-grid { gap:16px }
+}
 </style>
 </head>
 <body>
 <header>
   <div class="brand"><span class="brand-mark" aria-hidden="true">T</span><div><h1>Tukuru</h1><p>Monitoreo de tienda</p></div></div>
-  <div class="row header-actions"><span class="pill" id="gem">Gemini: comprobando...</span><button class="sec" id="soundBtn" aria-pressed="false">Activar sonido</button></div>
+  <div class="row header-actions"><span class="pill" id="gem">Gemini: comprobando...</span><button class="sec" id="gemToggle" type="button" aria-pressed="false">Activar Gemini para alertas</button><span id="gemFeedback" class="msg" role="status"></span><span class="hdr-divider" aria-hidden="true"></span><button class="sec" id="soundBtn" aria-pressed="false">Activar sonido</button></div>
 </header>
-<nav aria-label="Vistas del dashboard"><button class="tab" id="monitorTab" aria-pressed="true">Monitoreo</button><button class="tab" id="configTab" aria-pressed="false">Configuracion</button></nav>
+<nav aria-label="Vistas del dashboard"><button class="tab" id="monitorTab" aria-pressed="true">Monitoreo</button><button class="tab" id="reviewTab" aria-pressed="false">Revision y aprendizaje</button><button class="tab" id="configTab" aria-pressed="false">Camaras y zonas</button></nav>
 <main>
   <div id="serverNotice" class="notice" role="status" hidden></div>
+  <p id="alertFeedback" class="msg" role="status" hidden></p>
   <div id="monitorView">
     <div class="page-heading"><div><h2>Vista general</h2><p>Camaras, personas y alertas en un solo lugar.</p></div><span id="lastUpdate" class="connection">Conectando con el servidor...</span></div>
     <div class="summary-grid">
@@ -141,7 +232,26 @@
         <section class="card"><div class="section-heading"><h2>Camaras en vivo</h2><button class="sec" id="addCameraBtn">Administrar camaras</button></div><div class="empty" id="noCams">Aun no hay camaras. Agrega la primera en Configuracion.</div><div class="camera-grid" id="videos"></div></section>
         <section class="card"><div class="section-heading"><div><h2>Personas en escena</h2><p>Despliega el detalle para consultar los indicadores.</p></div></div><div id="people" class="empty">Sin personas en escena.</div></section>
       </div>
-      <section class="card"><div class="section-heading"><h2>Alertas</h2><span id="alertCount" class="pill">0</span></div><div class="alert-toolbar"><select id="alertFilter" aria-label="Filtrar alertas"><option value="all">Todas las alertas</option><option value="pending">Pendientes</option><option value="acked">Reconocidas</option></select><button class="sec" id="clearAlertsBtn" hidden>Limpiar vista</button></div><p id="alertFeedback" class="msg" role="status"></p><div class="alert-list"><div id="alerts" class="empty">Sin alertas.</div></div></section>
+      <section class="card"><div class="section-heading"><div><h2>Alertas recientes</h2><p>Selecciona una o varias para revisarlas en la pestaña “Revision y aprendizaje”.</p></div><span id="alertCount" class="pill">0</span></div><div class="alert-toolbar"><select id="alertFilter" aria-label="Filtrar alertas"><option value="all">Todas las alertas</option><option value="pending">Pendientes</option><option value="acked">Reconocidas</option><option value="resolved">Anuladas automaticamente</option></select><button class="sec" id="clearAlertsBtn" hidden>Limpiar vista</button></div><div class="alert-list"><div id="alerts" class="empty">Sin alertas. Cuando aparezca una alerta de persona, podras revisarla aqui.</div></div></section>
+    </div>
+  </div>
+  <div id="reviewView" hidden>
+    <div class="page-heading"><div><h2>Revision y aprendizaje</h2><p>Revisa grupos de casos, asigna el origen de sus grabaciones y etiqueta en lote.</p></div><button id="loadReviewQueue" type="button">Actualizar casos pendientes</button></div>
+    <div class="review-layout">
+      <div class="review-main">
+        <section class="card"><div class="section-heading"><div><h2>Casos pendientes</h2><p>Las alertas repetidas se agrupan por seguimiento y origen en ventanas de dos minutos.</p></div><span class="pill" id="queueHint">Cola local</span></div>
+          <p class="review-help">Abre la evidencia y revisa el episodio completo antes de etiquetarlo. “Confirmar sospecha” indica un comportamiento sospechoso para evaluación; no es una conclusión legal de robo. Si no hay evidencia suficiente, usa “No concluyente”.</p>
+          <div id="reviewQueue" class="alert-list"><div class="empty">Pulsa “Actualizar casos pendientes” para cargar la cola.</div></div>
+        </section>
+        <section class="card"><div class="section-heading"><div><h2>Etiquetar seleccionados</h2><p>La etiqueta se aplica a las alertas incluidas en cada grupo marcado.</p></div><span id="batchCount" class="pill">0 seleccionadas</span></div>
+          <div class="review-toolbar"><button id="batchConfirm">Confirmar sospecha</button><button class="sec" id="batchDismiss">Falsa alarma</button><button class="sec" id="batchUnclear">No concluyente</button></div>
+        </section>
+      </div>
+      <aside class="review-side">
+        <section class="card"><h2>Flujo de revisión</h2><div class="review-step"><b>1</b><p><strong>Selecciona casos</strong>Marca los grupos relacionados en la cola.</p></div><div class="review-step"><b>2</b><p><strong>Identifica el origen</strong>Usa el mismo ID para la misma grabación; uno distinto para cada sesión independiente.</p></div><div class="review-step"><b>3</b><p><strong>Guarda tu revisión</strong>Confirma, descarta o deja el caso no concluyente.</p></div><p class="meta" style="margin-top:12px">Los casos no concluyentes quedan fuera del entrenamiento supervisado.</p></section>
+        <section class="card"><h2>Origen de grabación</h2><p class="meta" style="margin:6px 0 12px">Asigna un origen conocido a los incidentes seleccionados. No adivines: el origen sirve para separar sesiones al evaluar modelos.</p><label>ID de origen conocido<input id="recordingGroupInput" maxlength="80" placeholder="ej. tienda-turno-manana-01"><span>Sin nombres ni datos personales.</span></label><button class="sec" id="assignRecordingBtn" style="margin-top:10px;width:100%">Asignar origen a seleccionados</button></section>
+        <section class="card"><h2>Estado del conjunto</h2><p id="learningStatus" class="meta" role="status">Cargando estado de aprendizaje...</p></section>
+      </aside>
     </div>
   </div>
   <div id="configView" hidden>
@@ -153,6 +263,7 @@
       <label class="span-all">URL del stream (opcional)<input name="url" maxlength="512" placeholder="rtsp://192.168.1.64:554/Streaming/Channels/102"><span>Usa una URL completa o llena los datos de conexion.</span></label>
       <label>Nombre<input name="name" maxlength="60" placeholder="Pasillo 1 - Bebidas"></label>
       <label>ID (opcional)<input name="id" maxlength="32" placeholder="CAM-01"></label>
+      <label class="span-all">Grupo de grabacion para aprendizaje (opcional)<input name="recording_group_id" maxlength="80" placeholder="ej. tienda1-turno-manana-2026-11-05"><span>Usa el mismo ID al reiniciar Tukuru si es la misma grabacion/sesion. Cambialo para una grabacion independiente. No incluyas datos personales.</span></label>
       <label>Protocolo<select name="protocol"><option>rtsp</option><option>rtsps</option><option>http</option><option>https</option></select></label>
       <label>Marca (ruta del stream)<select name="brand"></select></label>
       <label>IP / host<input name="host" placeholder="192.168.1.64"></label>
@@ -160,13 +271,25 @@
       <label>Usuario<input name="user" maxlength="64"></label>
       <label>Contrasena<input name="password" type="password" maxlength="128" autocomplete="new-password" placeholder="(sin cambios si se edita)"></label>
       <label class="check-label span-all"><input name="enabled" type="checkbox" checked>Camara habilitada</label>
+      <p class="form-section">Ajustes de deteccion para esta camara (opcional)</p>
+      <div class="row span-all"><button id="topViewPreset" type="button" class="sec">Rellenar ajuste cenital inicial</button><span class="meta">Confianza 0.30 · altura minima 5%</span></div>
+      <label>Confianza minima de persona<input name="yolo_conf" type="number" min="0.05" max="0.95" step="0.01" placeholder="General (0.40)"><span>Menor puede aceptar mas detecciones dudosas; mayor puede perder personas.</span></label>
+      <label>Altura minima de persona (% del cuadro)<input name="min_person_height_pct" type="number" min="1" max="50" step="1" placeholder="General (10%)"><span>Para una vista superior, prueba 3–5%. No detecta cabezas que YOLO no reconozca.</span></label>
       <details class="advanced span-all" id="advancedFields"><summary>Ruta y zonas de deteccion</summary><div class="advanced-fields"><label class="span-all">Ruta personalizada (opcional)<input name="path" maxlength="256" placeholder="/Streaming/Channels/102"></label><label class="span-all">Zonas en JSON<textarea name="zones" rows="4" placeholder='{"estanteria":[[[0.0,0.2],[0.4,0.2],[0.4,0.8],[0.0,0.8]]]}'></textarea><span>Tipos: estanteria, caja, salida y personal. Coordenadas de 0 a 1.</span></label></div></details>
     </form>
     <div class="row form-actions">
       <button id="testBtn" type="button" class="sec">Probar conexion</button>
+      <button id="drawZonesBtn" type="button" class="sec" disabled>Editar zonas</button>
+      <button id="suggestBtn" type="button" class="sec" disabled>Sugerir zonas con Gemini</button>
+      <label>Modelo para zonas<select id="zoneModel"><option value="gemini-3-flash-preview">Gemini 3 Flash Preview</option><option id="configuredZoneModel" value="">Modelo configurado</option></select></label>
       <button id="saveBtn" type="button">Guardar y conectar</button>
       <button id="clearBtn" type="button" class="sec">Nueva camara</button>
     </div>
+    <p class="meta">Guarda y conecta la camara antes de editar zonas. Dibujar con mouse usa solo esta computadora; sugerir con Gemini envia una captura solo al pulsar ese boton. Ningun cambio se aplica hasta guardar.</p>
+    <section id="zoneEditorPanel" class="zone-workspace" hidden aria-label="Editor de zonas">
+      <div class="zone-stage"><div class="zone-toolbar"><label id="zoneKindLabel">Tipo de zona nueva<select id="zoneKind"><option value="estanteria">Estanteria</option><option value="caja">Caja</option><option value="salida">Salida</option><option value="personal">Personal</option></select></label><button id="deleteZoneBtn" type="button" class="del" disabled>Eliminar seleccionada</button><button id="applyZonesBtn" type="button" class="sec" hidden>Aplicar propuesta</button></div><p id="zoneHelp" class="meta">Selecciona una zona para resaltarla. Arrastra sobre la imagen para crear, mover o ajustar sus esquinas.</p><div id="zonePreview" class="zone-preview"></div><p id="zoneNotes" class="meta" hidden></p></div>
+      <aside class="zone-side"><section class="zone-legend"><h3>Colores de zonas</h3><div class="zone-legend-items"><div class="zone-legend-item"><i class="zone-swatch" style="color:#f0a020;background:#f0a020"></i>Estanteria: naranja</div><div class="zone-legend-item"><i class="zone-swatch" style="color:#3fb950;background:#3fb950"></i>Caja: verde</div><div class="zone-legend-item"><i class="zone-swatch" style="color:#4493f8;background:#4493f8"></i>Salida: azul</div><div class="zone-legend-item"><i class="zone-swatch" style="color:#bd8cff;background:#bd8cff"></i>Personal: morado</div></div></section><section class="zone-list"><h3>Zonas en esta camara</h3><div id="zoneItems" class="zone-items"><p class="zone-empty">Todavia no hay zonas.</p></div></section></aside>
+    </section>
     <span class="msg" id="camMsg" role="status"></span>
   </section><section class="card"><div class="section-heading"><h2>Camaras configuradas</h2></div><div id="camList"></div><div class="meta" id="credInfo"></div></section></div>
   </div>
@@ -190,29 +313,65 @@ const sequence = (p) => {
   return steps.length ? steps.join(" > ") : "-";
 };
 const LEVEL = { ok: "normal", observacion: "observacion", posible_ocultamiento: "POSIBLE OCULTAMIENTO", probable_sustraccion: "PROBABLE SUSTRACCION" };
-function showView(config) {
-  $("monitorView").hidden = config; $("configView").hidden = !config;
-  $("monitorTab").setAttribute("aria-pressed", String(!config));
-  $("configTab").setAttribute("aria-pressed", String(config));
+let gemActive = false, gemBusy = false;
+$("gemToggle").onclick = async () => {
+  if (gemBusy) return;
+  gemBusy = true; $("gemToggle").disabled = true;
+  try {
+    const result = await api("/api/gemini", { method: "POST", body: JSON.stringify({ enabled: !gemActive }) });
+    $("gemFeedback").textContent = result.saved ? "Preferencia guardada." : "Cambio aplicado; no se pudo guardar para el proximo inicio.";
+    $("gemFeedback").className = "msg " + (result.saved ? "ok" : "bad");
+    await refresh();
+  } catch (e) { $("gemFeedback").textContent = e.message; $("gemFeedback").className = "msg bad"; }
+  finally { gemBusy = false; $("gemToggle").disabled = false; }
+};
+function showView(view) {
+  const selected = typeof view === "boolean" ? (view ? "config" : "monitor") : view;
+  $("monitorView").hidden = selected !== "monitor";
+  $("reviewView").hidden = selected !== "review";
+  $("configView").hidden = selected !== "config";
+  $("monitorTab").setAttribute("aria-pressed", String(selected === "monitor"));
+  $("reviewTab").setAttribute("aria-pressed", String(selected === "review"));
+  $("configTab").setAttribute("aria-pressed", String(selected === "config"));
+  if (selected === "review") void loadReviewQueue();
 }
-$("monitorTab").onclick = () => showView(false);
-$("configTab").onclick = $("addCameraBtn").onclick = () => showView(true);
+$("monitorTab").onclick = () => showView("monitor");
+$("reviewTab").onclick = () => showView("review");
+$("configTab").onclick = $("addCameraBtn").onclick = () => showView("config");
 $("closeEvidence").onclick = () => $("evidenceDialog").close();
 $("evidenceDialog").onclick = e => { if (e.target === $("evidenceDialog")) $("evidenceDialog").close(); };
 
 ["generico","hikvision","dahua","tapo","reolink","uniview","axis"].forEach(b => { const o = el("option", "", b); o.value = b; document.querySelector("[name=brand]").append(o); });
 
-let soundOn = false, ctx = null, seenAlerts = null;
-$("soundBtn").onclick = async () => {
+let soundOn = true, ctx = null, seenAlerts = null;
+const selectedAlertIds = new Set();
+try { soundOn = localStorage.getItem("tukuru.sound") !== "off"; } catch { /* almacenamiento no disponible */ }
+function soundButton() {
+  const ready = ctx?.state === "running";
+  $("soundBtn").textContent = !soundOn ? "Activar sonido" : ready ? "Silenciar alertas" : "Activar sonido";
+  $("soundBtn").title = soundOn && !ready ? "Haz clic aqui o interactua con el panel para habilitar el sonido" : "";
+  $("soundBtn").setAttribute("aria-pressed", String(soundOn && ready));
+}
+async function unlockSound() {
+  if (!soundOn || ctx?.state === "running") return;
   try {
     if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
-    await ctx.resume(); soundOn = !soundOn;
-    $("soundBtn").textContent = soundOn ? "Sonido activado" : "Activar sonido";
-    $("soundBtn").setAttribute("aria-pressed", String(soundOn));
+    await ctx.resume();
+    soundButton();
   } catch { $("soundBtn").textContent = "Sonido no disponible"; }
+}
+document.addEventListener("pointerdown", e => { if (!e.target.closest("#soundBtn")) void unlockSound(); });
+document.addEventListener("keydown", e => { if (e.target !== $("soundBtn")) void unlockSound(); });
+$("soundBtn").onclick = async () => {
+  if (soundOn && ctx?.state === "running") soundOn = false;
+  else { soundOn = true; await unlockSound(); beep(false); }
+  try { localStorage.setItem("tukuru.sound", soundOn ? "on" : "off"); } catch { /* almacenamiento no disponible */ }
+  soundButton();
 };
+soundButton();
 function beep(critical) {
   if (!soundOn || !ctx) return;
+  if (ctx.state !== "running") void ctx.resume().catch(() => {});
   [0, 0.35, 0.7].forEach(t => { const o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = critical ? 960 : 640; g.gain.value = 0.15; o.connect(g); g.connect(ctx.destination); o.start(ctx.currentTime + t); o.stop(ctx.currentTime + t + 0.25); });
 }
 
@@ -282,15 +441,15 @@ function renderPeople(list) {
 }
 
 let alertRecords = [], alertKey = "", alertBusy = false;
-function alertMessage(text, bad = false) { $("alertFeedback").textContent = text; $("alertFeedback").className = "msg " + (bad ? "bad" : "ok"); }
+function alertMessage(text, bad = false) { $("alertFeedback").textContent = text; $("alertFeedback").className = "msg " + (bad ? "bad" : "ok"); $("alertFeedback").hidden = !text; }
 $("clearAlertsBtn").onclick = async () => {
   if (alertBusy || !confirm("Limpiar todas las alertas de la vista, incluidas las de otros filtros? La evidencia se conserva.")) return;
   await alertAction($("clearAlertsBtn"), "/api/alerts", "DELETE", "Vista de alertas limpia.");
 };
-async function alertAction(button, url, method, message) {
+async function alertAction(button, url, method, message, payload = {}) {
   if (alertBusy) return;
   alertBusy = true; button.disabled = true;
-  try { await api(url, { method, ...(method === "POST" ? { body: "{}" } : {}) }); alertMessage(message); }
+  try { await api(url, { method, ...(method === "POST" ? { body: JSON.stringify(payload) } : {}) }); alertMessage(message); }
   catch (e) { alertMessage(e.message, true); }
   finally { alertBusy = false; button.disabled = false; }
   await refresh();
@@ -300,15 +459,15 @@ function renderAlerts(list) {
   alertRecords = list;
   $("clearAlertsBtn").hidden = !list.length;
   const filter = $("alertFilter").value;
-  const filtered = list.filter(a => filter === "all" || (filter === "pending" ? !a.ack : a.ack));
+  const filtered = list.filter(a => filter === "all" || (filter === "pending" ? !a.ack && !a.resolved : filter === "resolved" ? !!a.resolved : filter === "acked" ? a.ack && !a.resolved : a.ack || a.resolved));
   $("alertCount").textContent = String(filtered.length);
   const key = JSON.stringify([filter, list]);
   if (key === alertKey || alertBusy) return; alertKey = key;
   const box = $("alerts"); box.replaceChildren();
-  if (!filtered.length) { box.className = "empty"; box.textContent = list.length ? "No hay alertas en este filtro." : "Sin alertas. Las nuevas apareceran aqui."; return; }
+  if (!filtered.length) { box.className = "empty"; box.textContent = list.length ? "No hay alertas en este filtro." : "Sin alertas. Cuando aparezca una alerta de persona, podras revisarla aqui."; return; }
   box.className = "";
   for (const a of filtered) {
-    const d = el("div", "alert " + a.level + (a.ack ? " acked" : ""));
+    const d = el("div", "alert " + a.level + (a.ack ? " acked" : "") + (a.resolved ? " resolved" : ""));
     const content = el("div", "alert-content");
     if (a.snapshot) {
       const button = el("button", "evidence-button"), i = el("img");
@@ -319,17 +478,81 @@ function renderAlerts(list) {
     }
     const body = el("div");
     const who = a.track_id != null ? ` - persona ID ${a.track_id}` : "";
-    d.append(el("div", "alert-heading lvl-" + a.level, (LEVEL[a.level] || a.level.toUpperCase()) + (a.shadow ? " (sombra)" : "")));
+    d.append(el("div", "alert-heading lvl-" + a.level, (LEVEL[a.level] || a.level.toUpperCase()) + (a.shadow ? " (sombra)" : "") + (a.resolved === "devolucion" ? " · DEVOLUCION" : a.resolved ? " · AUTO-ANULADA" : "")));
     body.append(el("p", "", a.camera_name + who), el("p", "", a.reason || ""));
     body.append(el("div", "meta", (a.iso || "").replace("T", " ") + (a.source ? " · " + a.source : "")));
+    if (a.review) body.append(el("div", "meta", "Revision: " + a.review.replaceAll("_", " ")));
+    if (a.resolved) body.append(el("div", "meta", "Anulada por " + (a.resolved === "devolucion" ? "devolucion observada" : "revision visual automatica") + ". Requiere revision humana para etiquetar."));
+    if (a.ml_shadow_score != null) body.append(el("div", "meta", "ML en sombra: " + Number(a.ml_shadow_score).toFixed(2)));
     content.append(body); d.append(content);
     const actions = el("div", "alert-actions");
-    if (!a.ack) { const b = el("button", "sec", "Reconocer"); b.onclick = () => alertAction(b, "/api/alerts/" + encodeURIComponent(a.id) + "/ack", "POST", "Alerta reconocida."); actions.append(b); }
-    else actions.append(el("span", "meta", "Reconocida"));
+    if (a.track_id != null) {
+      const select = el("input"); select.type = "checkbox"; select.checked = selectedAlertIds.has(a.id);
+      select.setAttribute("aria-label", "Seleccionar alerta de persona ID " + a.track_id);
+      select.onchange = () => { select.checked ? selectedAlertIds.add(a.id) : selectedAlertIds.delete(a.id); updateBatchCount(); };
+      actions.append(select);
+      for (const [label, title] of [["confirmado", "Confirmar sospecha"], ["descartado", "Falsa alarma"], ["no_concluyente", "No concluyente"]]) {
+        const b = el("button", "sec", title);
+        b.disabled = a.review === label;
+        b.onclick = () => alertAction(b, "/api/alerts/" + encodeURIComponent(a.id) + "/review", "POST", "Revision guardada.", {label});
+        actions.append(b);
+      }
+    }
+    if (!a.ack && !a.resolved) { const b = el("button", "sec", "Reconocer"); b.onclick = () => alertAction(b, "/api/alerts/" + encodeURIComponent(a.id) + "/ack", "POST", "Alerta reconocida."); actions.append(b); }
+    else if (a.ack) actions.append(el("span", "meta", "Reconocida"));
+    else if (a.resolved) actions.append(el("span", "meta", a.resolved === "devolucion" ? "Devolucion observada" : "Anulada automaticamente"));
     const rm = el("button", "del", "Eliminar"); rm.onclick = () => alertAction(rm, "/api/alerts/" + encodeURIComponent(a.id), "DELETE", "Alerta eliminada de la vista.");
     actions.append(rm); d.append(actions); box.append(d);
   }
+  updateBatchCount();
 }
+function updateBatchCount() { $("batchCount").textContent = selectedAlertIds.size + " seleccionadas"; }
+async function batchReview(label) {
+  if (!selectedAlertIds.size) { alertMessage("Selecciona al menos una alerta de persona.", true); return; }
+  const ids = [...selectedAlertIds];
+  try {
+    const result = await api("/api/reviews/batch", {method:"POST", body:JSON.stringify({ids,label})});
+    selectedAlertIds.clear(); alertMessage(`Revisadas ${result.saved} de ${result.requested} alertas.`);
+    await refresh(); await loadReviewQueue();
+  } catch (e) { alertMessage(e.message, true); }
+}
+$("batchConfirm").onclick = () => batchReview("confirmado");
+$("batchDismiss").onclick = () => batchReview("descartado");
+$("batchUnclear").onclick = () => batchReview("no_concluyente");
+async function loadReviewQueue() {
+  const box = $("reviewQueue"); box.replaceChildren(el("div", "empty", "Cargando casos pendientes..."));
+  try {
+    const cases = await api("/api/reviews/queue?limit=100"); box.replaceChildren();
+    if (!cases.length) { box.className = "alert-list empty"; box.textContent = "No hay casos pendientes."; return; }
+    box.className = "alert-list";
+    for (const item of cases) {
+      const card = el("article", "alert " + item.level), content = el("div", "alert-content"), body = el("div");
+      if (item.evidence_url) { const img = el("img", "evidence-button"); img.src = item.evidence_url; img.loading = "lazy"; img.alt = "Evidencia local"; content.append(img); }
+      if (item.record_type === "observacion") body.append(el("span", "pill", "Muestra local · no generó alerta"));
+      else if (item.record_type === "mixto") body.append(el("span", "pill", "Alertas y muestras locales"));
+      body.append(el("strong", "", `${item.camera_id} · persona ID ${item.track_id} · ${item.count} caso(s)`));
+      body.append(el("p", "", item.reason || ""));
+      body.append(el("div", "meta", new Date(item.time * 1000).toLocaleString() + (item.recording_known ? " · origen identificado" : " · origen desconocido")));
+      if (item.shadow_score != null) body.append(el("div", "meta", `Puntuacion experimental en sombra: ${Number(item.shadow_score).toFixed(2)}`));
+      if (item.novelty_percentile != null) body.append(el("div", "meta", `Novedad relativa: ${Number(item.novelty_percentile).toFixed(1)} percentil frente a casos descartados (exploratoria)`));
+      const check = el("input"); check.type = "checkbox"; check.checked = item.incident_ids.every(id => selectedAlertIds.has(id));
+      check.setAttribute("aria-label", `Seleccionar grupo de ${item.count} alertas`);
+      check.onchange = () => { for (const id of item.incident_ids) check.checked ? selectedAlertIds.add(id) : selectedAlertIds.delete(id); updateBatchCount(); };
+      content.append(body); card.append(check, content); box.append(card);
+    }
+    updateBatchCount();
+  } catch (e) { box.className = "empty"; box.textContent = "No se pudo cargar la cola: " + e.message; }
+}
+$("loadReviewQueue").onclick = loadReviewQueue;
+$("assignRecordingBtn").onclick = async () => {
+  const recording_id = $("recordingGroupInput").value.trim(), ids = [...selectedAlertIds];
+  if (!ids.length || !recording_id) { alertMessage("Selecciona alertas e indica un origen conocido.", true); return; }
+  try {
+    const result = await api("/api/recordings/assign", {method:"POST", body:JSON.stringify({ids, recording_id})});
+    alertMessage(`Origen asignado a ${result.updated} incidentes.`); selectedAlertIds.clear();
+    updateBatchCount(); await loadReviewQueue(); await refresh();
+  } catch (e) { alertMessage(e.message, true); }
+};
 
 let refreshing = false;
 async function refresh() {
@@ -339,10 +562,20 @@ async function refresh() {
     const [st, alerts] = await Promise.all([api("/api/status"), api("/api/alerts?limit=200")]);
     renderCameras(st.cameras); renderPeople(st.cameras); renderAlerts(alerts);
     const g = st.gemini;
+    $("configuredZoneModel").value = g.model;
+    $("configuredZoneModel").textContent = "Modelo configurado (" + g.model + ")";
+    gemActive = g.active;
+    $("gemToggle").textContent = g.active ? "Desactivar Gemini para alertas" : "Activar Gemini para alertas";
+    $("gemToggle").title = g.active ? "Detiene nuevas revisiones de incidentes" : "Envia recortes de posibles incidentes a Gemini";
+    $("gemToggle").setAttribute("aria-pressed", String(g.active));
     const paused = g.active && g.paused_seconds > 0;
     $("gem").textContent = paused ? "Gemini en pausa" : g.active ? "Gemini activo" : "Solo analisis local";
     $("gem").title = g.active ? `${g.calls} consultas · ${g.tokens} tokens` + (paused ? ` · Pausa: ${g.paused_seconds} s` : "") : g.disabled_reason || "Gemini apagado";
     $("gem").className = "pill " + (g.active && !paused ? "ok" : "warn");
+    const learning = st.learning;
+    $("learningStatus").textContent = learning
+      ? `Etiquetas: ${learning.confirmado} sospechas · ${learning.descartado} descartadas · ${learning.no_concluyente} no concluyentes. Datos locales: ${learning.calidad_datos?.muestras_locales_revisadas ?? 0}/${learning.calidad_datos?.muestras_locales ?? 0} muestras revisadas. Origen: ${learning.calidad_datos?.grupos_origen_declarados ?? 0} grupos · ${learning.calidad_datos?.origen_desconocido ?? 0} sin identificar. Modelo: ${st.ml_shadow_active ? "en sombra" : "no activo"}. Telegram: ${st.telegram_configured ? "configurado" : "sin configurar"}.`
+      : "No se pudo consultar el estado de aprendizaje.";
     $("alertsPill").textContent = st.active_alerts;
     $("alertsPill").style.color = st.active_alerts ? "var(--warn)" : "var(--txt)";
     $("cameraCount").textContent = st.cameras.filter(c => c.stream?.state === "connected").length + " / " + st.cameras.length;
@@ -350,7 +583,16 @@ async function refresh() {
     $("lastUpdate").textContent = "Actualizado " + new Date().toLocaleTimeString("es", { hour:"2-digit", minute:"2-digit", second:"2-digit" });
     $("serverNotice").hidden = true;
     const ids = new Set(alerts.map(a => a.id));
-    if (seenAlerts) alerts.filter(a => !seenAlerts.has(a.id) && !a.shadow && !a.ack).forEach(a => beep(a.level === "probable_sustraccion"));
+    if (seenAlerts) {
+      const incoming = alerts.filter(a => !seenAlerts.has(a.id) && !a.shadow && !a.ack && !a.resolved);
+      if (incoming.length) {
+        alertMessage(`${incoming.length} alerta${incoming.length === 1 ? " nueva" : "s nuevas"} para revisar.`);
+        beep(incoming.some(a => a.level === "probable_sustraccion"));
+      }
+    } else {
+      const pending = alerts.filter(a => !a.shadow && !a.ack && !a.resolved).length;
+      if (pending) alertMessage(`${pending} alerta${pending === 1 ? " pendiente" : "s pendientes"} de revision.`);
+    }
     seenAlerts = ids;
     renderCamList(st.cameras, st.credentials_store);
   } catch (e) {
@@ -363,10 +605,167 @@ const PORTS = { rtsp: 554, rtsps: 322, http: 80, https: 443 };
 const form = () => $("camForm");
 const setPortHint = () => { form().elements.port.placeholder = PORTS[form().elements.protocol.value] || ""; };
 form().elements.protocol.onchange = setPortHint; setPortHint();
+const ZONE_COLORS = { estanteria: "#f0a020", caja: "#3fb950", salida: "#4493f8", personal: "#bd8cff" };
+const ZONE_LABELS = { estanteria: "Estanteria", caja: "Caja", salida: "Salida", personal: "Personal" };
+const clamp01 = n => Math.max(0, Math.min(1, n));
+const zoneArea = poly => Math.abs(poly.reduce((sum, [x,y], i) => {
+  const [nx, ny] = poly[(i + 1) % poly.length]; return sum + x * ny - nx * y;
+}, 0)) / 2;
+let suggestedZones = null, zoneEditor = null;
+function clearZoneProposal() {
+  suggestedZones = null; zoneEditor = null;
+  $("zoneEditorPanel").hidden = true;
+  $("zonePreview").hidden = true; $("zonePreview").replaceChildren();
+  $("zoneNotes").hidden = true; $("zoneNotes").textContent = "";
+  $("zoneHelp").hidden = true; $("zoneKindLabel").hidden = true;
+  $("deleteZoneBtn").hidden = true; $("applyZonesBtn").hidden = true;
+}
+function readFormZones() {
+  let raw;
+  try { raw = JSON.parse(form().elements.zones.value.trim() || "{}"); }
+  catch { throw new Error("Zonas: JSON invalido. Corrigelo o borra el texto antes de dibujar."); }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Zonas: se esperaba un objeto.");
+  const zones = {};
+  for (const [kind, polygons] of Object.entries(raw)) {
+    if (!ZONE_COLORS[kind] || !Array.isArray(polygons) || polygons.length > 8) throw new Error("Zonas guardadas invalidas.");
+    zones[kind] = polygons.map(poly => {
+      if (!Array.isArray(poly) || poly.length < 3 || poly.length > 16) throw new Error("Poligono guardado invalido.");
+      return poly.map(point => {
+        if (!Array.isArray(point) || point.length !== 2 || point.some(v => !Number.isFinite(v) || v < 0 || v > 1))
+          throw new Error("Coordenadas guardadas invalidas.");
+        return [...point];
+      });
+    });
+  }
+  return zones;
+}
+function renderZoneOverlay() {
+  if (!zoneEditor) return;
+  const svg = zoneEditor.svg; svg.replaceChildren();
+  const background = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  background.setAttribute("x", "0"); background.setAttribute("y", "0");
+  background.setAttribute("width", "1000"); background.setAttribute("height", "1000");
+  background.setAttribute("fill", "transparent"); background.style.pointerEvents = "all";
+  svg.append(background);
+  for (const [kind, polygons] of Object.entries(suggestedZones)) polygons.forEach((poly, index) => {
+    const shape = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+    shape.setAttribute("points", poly.map(([x,y]) => `${x*1000},${y*1000}`).join(" "));
+    const selected = zoneEditor.selected?.kind === kind && zoneEditor.selected.index === index;
+    shape.setAttribute("fill", ZONE_COLORS[kind]); shape.setAttribute("fill-opacity", selected ? "0.38" : "0.22");
+    shape.setAttribute("stroke", ZONE_COLORS[kind]); shape.setAttribute("stroke-width", selected ? "8" : "5");
+    shape.setAttribute("data-kind", kind); shape.setAttribute("data-index", index);
+    shape.style.cursor = "move"; svg.append(shape);
+    if (zoneEditor.selected?.kind === kind && zoneEditor.selected.index === index) poly.forEach(([x,y], point) => {
+      const handle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      handle.setAttribute("cx", x*1000); handle.setAttribute("cy", y*1000); handle.setAttribute("r", "12");
+      handle.setAttribute("fill", "#fff"); handle.setAttribute("stroke", ZONE_COLORS[kind]);
+      handle.setAttribute("stroke-width", "4"); handle.setAttribute("data-kind", kind);
+      handle.setAttribute("data-index", index); handle.setAttribute("data-point", point);
+      handle.style.cursor = "grab"; svg.append(handle);
+    });
+  });
+  const list = $("zoneItems"); list.replaceChildren();
+  let total = 0;
+  for (const [kind, polygons] of Object.entries(suggestedZones)) polygons.forEach((poly, index) => {
+    total++;
+    const item = el("button", "zone-item"); item.type = "button";
+    item.setAttribute("aria-pressed", String(zoneEditor.selected?.kind === kind && zoneEditor.selected.index === index));
+    const name = el("span", "zone-item-name");
+    const swatch = el("i", "zone-swatch"); swatch.style.color = ZONE_COLORS[kind]; swatch.style.background = ZONE_COLORS[kind];
+    name.append(swatch, document.createTextNode(`${ZONE_LABELS[kind]} ${index + 1}`));
+    item.append(name, el("span", "meta", "Seleccionar"));
+    item.onclick = () => { zoneEditor.selected = {kind, index}; renderZoneOverlay(); };
+    list.append(item);
+  });
+  if (!total) list.append(el("p", "zone-empty", "Todavia no hay zonas. Elige un tipo y dibuja un rectangulo en la imagen."));
+  $("deleteZoneBtn").disabled = !zoneEditor.selected;
+}
+function zonePoint(e) {
+  const r = zoneEditor.svg.getBoundingClientRect();
+  return [clamp01((e.clientX-r.left)/r.width), clamp01((e.clientY-r.top)/r.height)];
+}
+function zoneDragStart(e) {
+  if (e.button !== 0 || !zoneEditor) return;
+  e.preventDefault();
+  const p = zonePoint(e), kind = e.target.getAttribute("data-kind"), index = Number(e.target.getAttribute("data-index"));
+  if (kind && Number.isInteger(index)) {
+    zoneEditor.selected = {kind, index};
+    const original = suggestedZones[kind][index].map(point => [...point]);
+    const point = e.target.getAttribute("data-point");
+    zoneEditor.drag = {mode: point === null ? "move" : "vertex", kind, index,
+                       point: Number(point), start: p, original};
+  } else {
+    const type = $("zoneKind").value, polygons = suggestedZones[type] ||= [];
+    if (polygons.length >= 8) { say("bad", "Maximo 8 zonas de este tipo."); return; }
+    const index = polygons.length;
+    polygons.push([p, p, p, p].map(point => [...point]));
+    zoneEditor.selected = {kind:type, index};
+    zoneEditor.drag = {mode:"draw", kind:type, index, start:p};
+  }
+  zoneEditor.svg.setPointerCapture(e.pointerId); renderZoneOverlay();
+}
+function zoneDragMove(e) {
+  if (!zoneEditor?.drag) return;
+  e.preventDefault();
+  const drag = zoneEditor.drag, p = zonePoint(e), poly = suggestedZones[drag.kind][drag.index];
+  if (drag.mode === "draw") {
+    const x1 = Math.min(drag.start[0],p[0]), x2 = Math.max(drag.start[0],p[0]);
+    const y1 = Math.min(drag.start[1],p[1]), y2 = Math.max(drag.start[1],p[1]);
+    suggestedZones[drag.kind][drag.index] = [[x1,y1],[x2,y1],[x2,y2],[x1,y2]];
+  } else if (drag.mode === "vertex") {
+    poly[drag.point] = p;
+  } else {
+    const xs = drag.original.map(q => q[0]), ys = drag.original.map(q => q[1]);
+    const dx = Math.max(-Math.min(...xs), Math.min(1-Math.max(...xs), p[0]-drag.start[0]));
+    const dy = Math.max(-Math.min(...ys), Math.min(1-Math.max(...ys), p[1]-drag.start[1]));
+    suggestedZones[drag.kind][drag.index] = drag.original.map(([x,y]) => [x+dx,y+dy]);
+  }
+  renderZoneOverlay();
+}
+function zoneDragEnd(e) {
+  if (!zoneEditor?.drag) return;
+  const drag = zoneEditor.drag, polygons = suggestedZones[drag.kind], poly = polygons[drag.index];
+  if (zoneArea(poly) < 0.001) {
+    if (drag.mode === "draw") { polygons.splice(drag.index, 1); zoneEditor.selected = null; }
+    else polygons[drag.index] = drag.original;
+    say("bad", "Zona demasiado pequena; se descarto el cambio.");
+  } else if (zoneEditor.source === "manual") form().elements.zones.value = JSON.stringify(suggestedZones);
+  zoneEditor.drag = null;
+  if (zoneEditor.svg.hasPointerCapture(e.pointerId)) zoneEditor.svg.releasePointerCapture(e.pointerId);
+  renderZoneOverlay();
+}
+function showZoneEditor(preview, zones, source, note) {
+  clearZoneProposal();
+  suggestedZones = JSON.parse(JSON.stringify(zones));
+  const box = $("zonePreview"), img = el("img"); img.src = preview;
+  img.alt = "Captura de la camara para editar zonas";
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 1000 1000"); svg.setAttribute("preserveAspectRatio", "none");
+  zoneEditor = {svg, source, selected:null, drag:null};
+  svg.addEventListener("pointerdown", zoneDragStart);
+  svg.addEventListener("pointermove", zoneDragMove);
+  svg.addEventListener("pointerup", zoneDragEnd);
+  svg.addEventListener("pointercancel", zoneDragEnd);
+  box.replaceChildren(img, svg); box.hidden = false; $("zoneEditorPanel").hidden = false;
+  $("zoneKindLabel").hidden = false; $("zoneHelp").hidden = false; $("deleteZoneBtn").hidden = false;
+  $("zoneNotes").textContent = note;
+  $("zoneNotes").hidden = false; $("applyZonesBtn").hidden = source !== "gemini";
+  renderZoneOverlay();
+}
+function deleteSelectedZone() {
+  if (!zoneEditor?.selected) return;
+  const {kind, index} = zoneEditor.selected;
+  suggestedZones[kind].splice(index, 1); zoneEditor.selected = null;
+  if (!suggestedZones[kind].length) delete suggestedZones[kind];
+  if (zoneEditor.source === "manual") form().elements.zones.value = JSON.stringify(suggestedZones);
+  renderZoneOverlay(); say("ok", "Zona quitada del dibujo. Guarda la camara para aplicar el cambio.");
+}
 
 function formData() {
   const fe = form().elements, f = {};
-  for (const k of ["id","name","protocol","brand","host","port","user","password","path","url"]) { const v = fe[k].value.trim(); if (v) f[k] = v; }
+  for (const k of ["id","name","protocol","brand","host","port","user","password","path","url","recording_group_id","yolo_conf"]) { const v = fe[k].value.trim(); if (v) f[k] = v; }
+  const minHeightPct = fe.min_person_height_pct.value.trim();
+  if (minHeightPct) f.min_person_height = Number(minHeightPct) / 100;
   f.enabled = fe.enabled.checked;
   const z = fe.zones.value.trim();
   if (z) { try { f.zones = JSON.parse(z); } catch { throw new Error("Zonas: JSON invalido"); } } else f.zones = {};
@@ -374,32 +773,77 @@ function formData() {
 }
 function resetForm() {
   form().reset(); form().elements.id.readOnly = false; form().elements.enabled.checked = true;
-  $("formTitle").textContent = "Agregar camara"; $("advancedFields").open = false; setPortHint();
+  $("formTitle").textContent = "Agregar camara"; $("saveBtn").textContent = "Guardar y conectar";
+  $("advancedFields").open = false; setPortHint();
+  $("suggestBtn").disabled = true; $("drawZonesBtn").disabled = true; clearZoneProposal();
 }
 function say(cls, text) { const m = $("camMsg"); m.className = "msg " + cls; m.textContent = text; }
 async function run(btn, working, job) {
-  const buttons = [$("testBtn"), $("saveBtn"), $("clearBtn")]; buttons.forEach(b => b.disabled = true); say("", working);
-  try { await job(); } catch (e) { say("bad", e.message); } finally { buttons.forEach(b => b.disabled = false); }
+  const buttons = [$("testBtn"), $("saveBtn"), $("clearBtn"), $("drawZonesBtn"),
+                   $("suggestBtn"), $("applyZonesBtn"), $("deleteZoneBtn")];
+  buttons.forEach(b => b.disabled = true); say("", working);
+  try { await job(); } catch (e) { say("bad", e.message); }
+  finally {
+    buttons.forEach(b => b.disabled = false);
+    $("suggestBtn").disabled = $("drawZonesBtn").disabled = !form().elements.id.readOnly;
+    $("applyZonesBtn").disabled = !zoneEditor || zoneEditor.source !== "gemini";
+    $("deleteZoneBtn").disabled = !zoneEditor?.selected;
+  }
 }
 $("testBtn").onclick = () => run($("testBtn"), "Probando conexion (hasta 12 s)...", async () => {
   const r = await api("/api/cameras/test", { method: "POST", body: JSON.stringify(formData()) });
   say(r.ok ? "ok" : "bad", r.message);
 });
+$("drawZonesBtn").onclick = () => run($("drawZonesBtn"), "Cargando imagen de la camara...", async () => {
+  const camId = form().elements.id.value;
+  if (!form().elements.id.readOnly || !camId) throw new Error("Guarda y conecta la camara primero.");
+  const zones = readFormZones();
+  const result = await api("/api/cameras/" + encodeURIComponent(camId) + "/zone-frame");
+  showZoneEditor(result.preview, zones, "manual", "Edicion local: esta captura no se envio a Gemini.");
+  say("ok", "Dibuja o mueve zonas y luego pulsa Guardar y conectar.");
+});
+$("suggestBtn").onclick = () => run($("suggestBtn"), "Gemini analiza una captura; puede tardar...", async () => {
+  const camId = form().elements.id.value;
+  if (!form().elements.id.readOnly || !camId) throw new Error("Guarda y conecta la camara primero.");
+  clearZoneProposal();
+  const result = await api("/api/cameras/" + encodeURIComponent(camId) + "/suggest-zones", {
+    method: "POST", body: JSON.stringify({model: $("zoneModel").value}) });
+  showZoneEditor(result.preview, result.zones, "gemini",
+                 "Modelo: " + result.model + ". " + (result.notes || "Sin notas adicionales."));
+  say("ok", "Propuesta lista. Revisa los poligonos; usa la propuesta y guarda la camara para aplicarla.");
+});
+$("deleteZoneBtn").onclick = deleteSelectedZone;
+$("applyZonesBtn").onclick = () => {
+  if (!zoneEditor || zoneEditor.source !== "gemini") return;
+  form().elements.zones.value = JSON.stringify(suggestedZones);
+  zoneEditor.source = "manual"; $("applyZonesBtn").hidden = true;
+  $("advancedFields").open = true; say("ok", "Zonas copiadas. Puedes seguir ajustandolas con el mouse; luego guarda la camara.");
+};
 $("saveBtn").onclick = () => run($("saveBtn"), "Guardando...", async () => {
   const saved = await api("/api/cameras", { method: "POST", body: JSON.stringify(formData()) });
   resetForm(); say("ok", `Camara ${saved.name} (${saved.id}) guardada. Conectando...`); refresh();
 });
 $("clearBtn").onclick = () => { resetForm(); say("", ""); };
+$("topViewPreset").onclick = () => {
+  form().elements.yolo_conf.value = "0.30";
+  form().elements.min_person_height_pct.value = "5";
+  say("ok", "Perfil cenital rellenado para esta camara. Pulsa Guardar cambios y reconectar para aplicarlo.");
+};
 
 function editCamera(c) {
   showView(true);
+  clearZoneProposal(); $("suggestBtn").disabled = $("drawZonesBtn").disabled = false;
   const fe = form().elements;
   for (const k of ["id","name","protocol","brand","host","user","path"]) fe[k].value = c[k] ?? "";
+  fe.recording_group_id.value = c.recording_group_id || "";
+  fe.yolo_conf.value = c.yolo_conf ?? "";
+  fe.min_person_height_pct.value = c.min_person_height == null ? "" : String(Math.round(c.min_person_height * 100));
   fe.port.value = c.port || ""; fe.url.value = ""; fe.password.value = "";
   fe.enabled.checked = c.enabled; fe.id.readOnly = true;
   fe.zones.value = c.zones ? JSON.stringify(c.zones) : "";
   $("advancedFields").open = Boolean(c.zones && Object.keys(c.zones).length);
-  $("formTitle").textContent = "Editando " + c.id; setPortHint(); say("", "");
+  $("formTitle").textContent = "Editando " + c.id; $("saveBtn").textContent = "Guardar cambios y reconectar";
+  setPortHint(); say("", "");
   form().scrollIntoView({ behavior: "smooth" });
 }
 
