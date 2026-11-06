@@ -15,6 +15,8 @@ from tukuru.config import ConfigError, Settings, validate_camera
 from tukuru.decision import decide
 from tukuru.heuristics import TrackState, clear_through, update_track
 from tukuru.vision import Person, PoseTracker, fp16_arguments, resolve_device
+from tukuru.tracker_config import bytetrack_config
+from tukuru.telegram import parse_review
 from tukuru.zones import ZoneSet
 
 
@@ -90,6 +92,23 @@ class SettingsValidation(unittest.TestCase):
         s = Settings.from_env()
         self.assertEqual(s.inference_fps, 8.0)
         self.assertEqual(s.max_cameras, 3)
+        self.assertEqual(s.track_buffer_frames, 60)
+
+    def test_track_buffer_is_configurable_with_safe_range(self):
+        for value in (15, 30, 60, 240):
+            with patch.dict(os.environ, {"TRACK_BUFFER_FRAMES": str(value)}):
+                self.assertEqual(Settings.from_env().track_buffer_frames, value)
+        with patch.dict(os.environ, {"TRACK_BUFFER_FRAMES": "241"}):
+            with self.assertRaisesRegex(ConfigError, "TRACK_BUFFER_FRAMES"):
+                Settings.from_env()
+
+    def test_tracker_yaml_uses_configured_buffer_without_mutating_ultralytics_defaults(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(bytetrack_config(Path(tmp), 60))
+            content = path.read_text(encoding="utf-8")
+            self.assertIn("track_buffer: 60", content)
+            self.assertIn("track_low_thresh: 0.1", content)
+            self.assertTrue(path.is_relative_to(Path(tmp)))
 
     def test_device_choices_and_default(self):
         with patch.dict(os.environ, {"DEVICE": ""}):
@@ -101,6 +120,24 @@ class SettingsValidation(unittest.TestCase):
             with self.assertRaisesRegex(ConfigError, "DEVICE"):
                 Settings.from_env()
 
+    def test_telegram_requires_complete_configuration(self):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "token", "TELEGRAM_CHAT_ID": "",
+                                     "TELEGRAM_ALLOWED_USER_IDS": ""}):
+            with self.assertRaisesRegex(ConfigError, "Telegram requiere"):
+                Settings.from_env()
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "token", "TELEGRAM_CHAT_ID": "-100123",
+                                     "TELEGRAM_ALLOWED_USER_IDS": "123,456"}):
+            s = Settings.from_env()
+            self.assertEqual((s.telegram_chat_id, s.telegram_allowed_user_ids), ("-100123", (123, 456)))
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "", "TELEGRAM_CHAT_ID": "",
+                                     "TELEGRAM_ALLOWED_USER_IDS": ""}):
+            self.assertIsNone(Settings.from_env().telegram_bot_token)
+
+    def test_shadow_model_path_is_relative_to_project(self):
+        with patch.dict(os.environ, {"ML_SHADOW_MODEL": "data/models_ml/candidato.json"}):
+            path = Settings.from_env().ml_shadow_model
+        self.assertEqual(path, Path(__file__).resolve().parent.parent / "data/models_ml/candidato.json")
+
     def test_probable_score_must_exceed_possible(self):
         os.environ.update(LOCAL_POSSIBLE_SCORE="0.9", LOCAL_PROBABLE_SCORE="0.8")
         try:
@@ -110,6 +147,16 @@ class SettingsValidation(unittest.TestCase):
             for k in ("LOCAL_POSSIBLE_SCORE", "LOCAL_PROBABLE_SCORE"):
                 os.environ.pop(k, None)
 
+
+class TelegramReview(unittest.TestCase):
+    def test_only_allowed_user_in_configured_chat_can_review(self):
+        update = {"callback_query": {"from": {"id": 42}, "message": {"chat": {"id": -100123}},
+                                     "data": "review:abcdef12:c"}}
+        self.assertEqual(parse_review(update, "-100123", (42,)), ("abcdef12", "confirmado", 42))
+        self.assertIsNone(parse_review(update, "-100999", (42,)))
+        self.assertIsNone(parse_review(update, "-100123", (43,)))
+        update["callback_query"]["data"] = "review:abcdef12:bad"
+        self.assertIsNone(parse_review(update, "-100123", (42,)))
 
 class DeviceSelection(unittest.TestCase):
     def test_fp16_arguments_follow_ultralytics_version(self):
@@ -339,6 +386,22 @@ class Decision(Scene, unittest.TestCase):
         self.steal()
         self.assertEqual(decide(self.ts, self.t, self.s)[0], "observacion")   # revision pendiente: no se alerta a ciegas
 
+    def test_single_concealment_without_return_prompts_early_review(self):
+        self.play(2)
+        self.steal()
+        self.play(3.2)
+        self.assertEqual(decide(self.ts, self.t, self.s)[:2], ("posible_ocultamiento", "local"))
+
+    def test_high_score_not_silenced_by_pending_gemini(self):
+        self.steal()
+        self.ts.score = self.s.local_possible_score + .1
+        self.ts.review_pending = True
+        self.assertEqual(decide(self.ts, self.t, self.s)[:2], ("posible_ocultamiento", "local"))
+
+    def test_early_review_requires_observed_concealment(self):
+        self.ts.score = 2.0
+        self.assertEqual(decide(self.ts, self.t, self.s)[0], "ok")
+
     def test_gemini_confirms_then_exit_escalates(self):
         self.play(2)
         self.steal()
@@ -444,6 +507,35 @@ class PerHand(Scene, unittest.TestCase):
 
 
 class AlertRepeat(unittest.TestCase):
+    def test_cleared_sequence_is_resolved_but_still_needs_human_label(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            settings = replace(Settings.from_env(), data_dir=Path(tmp), shadow_mode=False)
+            manager = AlertManager(settings)
+            ts = TrackState(1, "C", 0.0, 0.0)
+            ts.conceals.append(1.0)
+            manager.evaluate(ts, ("posible_ocultamiento", "local", "x"), 2.0, "cam", lambda: None)
+            alert_id = manager.recent()[0]["id"]
+            self.assertEqual(manager.active_count(), 1)
+
+            ts.events.append((3.0, "devolucion", 0.0))
+            ts.cleared_until = 1.0
+            manager.evaluate(ts, ("observacion", "local", "devuelto"), 3.0, "cam", lambda: None)
+            self.assertEqual(manager.active_count(), 0)
+            self.assertEqual(manager.recent()[0]["resolved"], "devolucion")
+            self.assertNotIn("review", manager.recent()[0])
+            self.assertEqual(AlertManager(settings).recent()[0]["resolved"], "devolucion")
+            self.assertTrue(manager.review(alert_id, "descartado", "operador", "panel"))
+
+    def test_gemini_clear_is_not_mislabeled_as_return(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = AlertManager(replace(Settings.from_env(), data_dir=Path(tmp), shadow_mode=False))
+            ts = TrackState(1, "C", 0.0, 0.0)
+            ts.conceals.append(1.0)
+            manager.evaluate(ts, ("posible_ocultamiento", "local", "x"), 2.0, "cam", lambda: None)
+            ts.cleared_until = 1.0
+            manager.evaluate(ts, ("ok", "", ""), 3.0, "cam", lambda: None)
+            self.assertEqual(manager.recent()[0]["resolved"], "revision_visual")
+
     def test_repeats_respect_cooldown_but_escalation_is_immediate(self):
         with tempfile.TemporaryDirectory() as tmp:
             manager = AlertManager(replace(Settings.from_env(), data_dir=Path(tmp), shadow_mode=False))

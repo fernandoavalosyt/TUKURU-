@@ -2,7 +2,7 @@
 
 Sistema de visión artificial que detecta **robo hormiga** en una tienda de abarrotes: un cliente toma un producto del estante, lo oculta en el bolsillo, bajo la ropa o en un bolso, y sale sin pagarlo. Emite una alerta con evidencia fotográfica para que una persona la revise.
 
-Es una versión de producto mínimo viable: una sola aplicación Python, sin bases de datos ni contenedores, que funciona solo con CPU. Está pensado para 2 cámaras, ampliable a 3 (`MAX_CAMERAS`, máximo 4).
+Es una versión de producto mínimo viable: una sola aplicación Python, con SQLite local para incidentes y sin contenedores. Funciona en CPU y puede usar CUDA si PyTorch la detecta. Está pensado para 2 cámaras, ampliable a 3 (`MAX_CAMERAS`, máximo 4).
 
 > Tukuru **no acusa**: señala comportamiento sospechoso y guarda evidencia. La confirmación y cualquier acción son siempre de una persona.
 
@@ -116,13 +116,45 @@ Abra el panel: http://127.0.0.1:5000
 
 El panel separa **Monitoreo** (cámaras en vivo, personas e indicadores, alertas) de
 **Configuración** (alta, edición y conexión de cámaras). Las alertas se pueden filtrar
-por pendientes o reconocidas; pulsa la miniatura para ampliar la evidencia.
+por pendientes o reconocidas/resueltas; pulsa la miniatura para ampliar la evidencia.
+Al editar una cámara hay ajustes opcionales de confianza YOLO y altura mínima de persona.
+Sirven para probar vistas cenitales sin cambiar el resto de cámaras: deja los campos vacíos
+para conservar los valores generales. Reducirlos puede admitir cabezas/cajas pequeñas que
+YOLO ya detecte, pero no añade un detector de cabezas y puede aumentar falsos positivos.
+Guardar reinicia el análisis de esa cámara y reinicia sus IDs activos.
+Al interactuar por primera vez con el panel se habilita el sonido de nuevas alertas;
+el botón superior permite probarlo o silenciarlo y recuerda la preferencia. El navegador
+requiere esa primera interacción para reproducir audio. No suenan las alertas antiguas
+al abrir la página ni las del modo sombra. Si una secuencia se anula por devolución o
+revisión visual, aparece como resuelta y deja de contar como pendiente; esto no la
+clasifica automáticamente como falsa alarma. La etiqueta la pone un operador.
+El panel muestra el total de revisiones del esquema actual (última etiqueta por
+incidente), las sesiones registradas, si Telegram está configurado y si se cargó un
+modelo en sombra. Configurado no significa que se haya probado la conexión al bot.
+El botón **Activar/Desactivar Gemini** cambia la revisión de incidentes sin reiniciar.
+Al activarlo, Tukuru puede enviar recortes de personas a Gemini cuando detecte un
+posible ocultamiento. La elección se guarda en `data/gemini_state.json` y prevalece
+sobre `GEMINI_ENABLED` en el siguiente arranque; la clave permanece en `.env`.
 **Eliminar** quita una alerta y **Limpiar vista** quita todas, conservando el registro
 y las fotos. Las alertas retiradas de la vista no reaparecen al reiniciar.
 
 ### Agregar una cámara
 
-Desde el panel, en "Agregar / editar cámara", complete IP, usuario, contraseña y marca, pegue las zonas y use "Probar conexión" antes de guardar. También puede definirla en `.env` (`CAMERA_1_URL`, `CAMERA_1_USER`, ...; ver `.env.example`).
+Desde el panel, en "Agregar / editar cámara", complete IP, usuario, contraseña y marca,
+use "Probar conexión" y guarde. Después edite esa cámara y pulse **Dibujar zonas con
+mouse**: elija estantería, caja, salida o personal y arrastre sobre la imagen para crear
+un rectángulo. Puede moverlo arrastrando dentro, ajustar sus puntos o quitarlo. Pulse
+**Guardar y conectar** para aplicar el dibujo. Esta opción no envía imágenes fuera del
+equipo.
+
+También puede pulsar **Sugerir zonas con Gemini**. Se enviará una sola captura reducida
+(lado máximo 640 px) a Gemini; puede mover o ajustar los polígonos propuestos con el
+mouse, pulsar **Usar zonas dibujadas** y finalmente **Guardar y conectar**.
+El selector usa inicialmente `gemini-3-flash-preview`, que se había probado con
+imágenes en este proyecto; puede elegir el modelo configurado para las alertas.
+La propuesta no se aplica automáticamente. Si no se ven caja, salida o zona de personal,
+deben quedar vacías. Para ajustarlas todavía puede editar el JSON de zonas. También
+puede definir la cámara en `.env` (`CAMERA_1_URL`, `CAMERA_1_USER`, ...; ver `.env.example`).
 
 Para probar sin cámara: `CAMERA_1_PROTOCOL=file` y `CAMERA_1_PATH=C:\ruta\al\video.mp4`.
 
@@ -133,12 +165,16 @@ Todas las opciones están en `.env.example`. Las principales:
 | Variable | Valor por defecto | Descripción |
 |---|---|---|
 | `GEMINI_API_KEY` | vacío | Clave de Google AI Studio |
+| `GEMINI_ENABLED` | true | Estado inicial si todavía no existe una preferencia guardada desde el panel |
 | `GEMINI_MAX_CALLS_PER_HOUR` | 120 | Tope de consultas por hora |
 | `GEMINI_FRAMES` | 12 | Recortes por consulta |
 | `INFERENCE_FPS` | 8 | Análisis por segundo con personas en escena |
 | `IDLE_FPS` | 2 | Análisis por segundo con la tienda vacía |
+| `TRACK_BUFFER_FRAMES` | 60 | Cuadros que ByteTrack conserva una persona perdida (a 8 fps, hasta 7,5 s) |
 | `MAX_FRAME_SIDE` | 640 | Lado máximo del frame analizado |
 | `DEVICE` | auto | CUDA si está disponible; CPU si no (`cpu`, `cuda:0`, `mps`) |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_ALLOWED_USER_IDS` | vacío | Alertas con foto y revisión por operadores autorizados en Telegram; opcional |
+| `ML_SHADOW_MODEL` | vacío | Candidato local que puntúa alertas sin cambiar niveles ni avisos |
 | `CONCEAL_WINDOW_SECONDS` | 8 | Ventana tras el alcance en que la mano al cuerpo cuenta |
 | `CONCEAL_MIN_SECONDS` | 0.6 | Permanencia de la mano junto al cuerpo |
 | `RETURN_WINDOW_SECONDS` | 6 | Si la misma mano vuelve al mismo sitio del estante en este tiempo, se anula |
@@ -229,7 +265,8 @@ python -m unittest discover -s tests
 - Con solo la pose no se ve el producto: el filtro de falsos positivos (producto en canasta, objetos propios) depende de Gemini. Sin Gemini habrá más falsos positivos.
 - Una persona que sale del encuadre de una cámara y entra a otra tiene un ID nuevo; la secuencia no se sigue entre cámaras. Conviene que la zona `estanteria` y la `salida` queden en la misma cámara, o cubrir el recorrido con zonas por cámara.
 - Una oclusión larga puede cambiar el ID de la persona y reiniciar su secuencia.
-- Las zonas se pegan como JSON; falta un editor visual sobre el video.
+- Las zonas se pueden dibujar sobre una captura de la cámara. Nuevas zonas se crean como rectángulos; las propuestas de Gemini conservan sus polígonos y permiten mover sus puntos. Falta validar la facilidad de uso con operadores reales.
 - En cámaras altas o de ojo de pez, la mano sobre el polígono de la estantería no implica contacto: una persona parada frente al estante tiene las manos "dentro" de la zona por perspectiva. Dibuje la zona solo sobre la parte donde la mano llega al alcanzar, no hasta el piso.
+- Si la vista cenital solo muestra cabezas, YOLO-pose puede no detectar personas ni articulaciones. El ajuste por cámara de confianza/altura no es un detector de cabeza. El muestreo y etiquetado local para preparar uno están en [docs/DETECCION_CENITAL.md](docs/DETECCION_CENITAL.md); todavía no hay pesos entrenados ni integración en alertas.
 - Si la persona queda tapada por una góndola, el seguimiento se corta y la secuencia en curso se pierde.
 - Los umbrales no están calibrados con video de la tienda real.

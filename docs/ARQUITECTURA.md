@@ -24,22 +24,111 @@ No escribe en `TrackState`, no interviene en `decide`, ni se envía como context
 `CONTAINERS` admite etiquetas de canasta para futuros pesos ajustados; COCO no incluye
 una clase general de canasta ni de producto de abarrotes.
 
+## Incidentes, revision y ML en sombra
+
+`AlertManager` conserva el registro JSONL y la foto. Cada alerta de persona nueva
+congela un vector de caracteristicas de `TrackState` en `data/incidents.sqlite3`, con
+identificador de sesion para evaluar por grupos. El panel y el bot opcional de Telegram
+registran revisiones humanas con historial (`confirmado`, `descartado`, `no_concluyente`).
+Reconocer o retirar una alerta de la vista no es una etiqueta. Telegram usa sondeo de
+`callback_query`, exige chat e IDs de usuario autorizados y nunca bloquea los hilos de
+camara al enviar avisos.
+Cuando se anula el ocultamiento asociado a una alerta, esta queda marcada como
+`resolved` en el historial JSONL y en la vista. Deja de contar como pendiente, pero
+no recibe una etiqueta de entrenamiento sin revision humana. El panel reproduce un
+aviso sonoro solo ante alertas nuevas y activas, tras la primera interaccion que el
+navegador exige para permitir audio.
+`GET /api/status` incluye el resumen de las ultimas etiquetas por incidente del
+esquema vigente, sesiones registradas y estados de configuracion de Telegram/modelo.
+Las sesiones registradas no garantizan videos independientes.
+
+## Control de Gemini y propuesta de zonas
+
+El panel usa `POST /api/gemini` para activar o desactivar el juez en caliente. La
+preferencia booleana se guarda en `data/gemini_state.json`, sin clave. Al desactivar,
+no se admiten consultas nuevas; resultados de la generacion anterior no se aplican.
+Una llamada que ya salio a la red puede terminar. El archivo guardado prevalece sobre
+`GEMINI_ENABLED` al reiniciar; sin archivo se usa ese valor inicial.
+
+`POST /api/cameras/<id>/suggest-zones` solo se ejecuta por pulsacion del operador.
+Toma un cuadro reciente sin anotaciones de la camara conectada, lo reduce a un maximo
+de 640 px y envia un JPEG a Gemini. Usa por defecto `gemini-3-flash-preview` para
+esta tarea; el operador puede elegir el modelo configurado del juez. Los errores HTTP
+de modelo, cuota y servicio se traducen a mensajes sin exponer la clave. La respuesta
+puede tardar hasta al menos 60 s antes de agotar el tiempo de espera. La respuesta
+estructurada se valida como poligonos
+normalizados antes de enviarla al panel. El panel superpone los poligonos a la misma
+captura y exige `Usar propuesta` y `Guardar y conectar` para modificar la camara.
+Ni la propuesta ni el modelo cambian las alertas hasta guardar zonas nuevas; las
+zonas no visibles deben quedar vacias.
+
+`GET /api/cameras/<id>/zone-frame` devuelve una captura local de la camara conectada,
+sin consultar Gemini. El editor SVG del panel usa esa imagen para crear rectangulos,
+mover poligonos o ajustar sus vertices por mouse. Las posiciones se mantienen en
+coordenadas normalizadas y se copian al formulario de la camara; la API existente de
+guardado sigue validando 3-16 puntos por poligono, 0-1 por coordenada y hasta 8
+poligonos por tipo. Las propuestas de Gemini usan el mismo editor y exigen pulsar
+`Usar zonas dibujadas` antes de guardarlas.
+
+`tukuru.ml.dataset` exporta solo incidentes revisados con el esquema vigente;
+`tukuru.ml.train` exige varias sesiones y ambas clases en entrenamiento/evaluacion.
+Entrena una regresion logistica fuera de la app y exporta coeficientes a JSON. Si
+`ML_SHADOW_MODEL` apunta al candidato, Tukuru anota una puntuacion experimental en las
+alertas sin cambiar `decide()` ni su nivel. La exportacion puede incluir muestras
+locales etiquetadas, ademas de alertas; aun no representa eventos que pose/tracking no
+llegaron a observar.
+
+## Procedencia y revision agrupada
+
+La base SQLite conserva `session_id` (ejecucion) y `recording_id` (origen de la
+grabacion) como conceptos distintos. El formulario de camaras permite definir un grupo
+estable por fuente/sesion; esa relacion depende de la declaracion correcta del
+operador y no se verifica automaticamente. En `replay`, el origen por defecto es
+SHA-256 del archivo. No se guarda
+la ruta de video. Registros anteriores o streams sin grupo configurado tienen origen
+desconocido y no salen en el dataset supervisado. `GET /api/reviews/queue` agrupa
+alertas pendientes y muestras locales de la misma camara/track/origen en ventanas de
+120 s; el panel permite seleccionar y etiquetar grupos por lote. No propaga etiquetas a futuros
+incidentes ni cambia el nivel de alerta.
+Si hay puntuacion `ML_SHADOW_MODEL`, los casos cercanos a 0.5 se ordenan primero para
+revision incierta; la puntuacion se muestra como experimental y no se interpreta como
+probabilidad calibrada. Si existen al menos 30 episodios `descartado` y 5 grupos de
+origen declarados, la cola calcula un percentil k-NN de distancia a esos casos como
+prioridad exploratoria de novedad. No etiqueta, entrena ni activa nada; el reporte
+`tukuru.ml.quality` indica cuando la referencia no alcanza. El pipeline muestrea eventos `alcance` y `devolucion` por
+debajo del nivel de alerta. El limite es 20 muestras por camara/hora y 30 s por
+seguimiento/evento; las imagenes quedan locales y se purgan con la retencion de
+evidencia. La señal de novedad solo ordena revisiones; no es una deteccion de robo ni
+una probabilidad calibrada.
+
 ## Flujo por camara (`pipeline.py`, un hilo por camara)
+
 
 ```
 CameraStream.latest()          frame mas reciente (camera.py)
   -> FrameOptimizer.process    reduce a <=640 px, devuelve (frame_reducido, escala), modo nocturno
   -> PoseTracker.infer         YOLO-pose + ByteTrack -> [Person(track_id, bbox, conf, kpts 17x3)]
+  -> WristMotionTracker        flujo optico forward-backward para una muneca ya detectada durante un alcance
   -> por persona:
        update_track(ts, person, zones, now, settings)     # heuristics.py
        store_crop(ts, frame_original, escala, now, ...)   # clips.py  (solo si Gemini esta activo)
+       observe_event(...)                                 # muestreo acotado local; no alerta/notifica
        _maybe_review(ts, now)                             # pide dictamen a Gemini si toca
        decide(ts, now, settings) -> (nivel, fuente, motivo)   # decision.py
        alerts.evaluate(ts, decision, ...)                 # alerts.py
   -> draw_tracks -> JPEG para /stream/<cam>
 ```
 
-`FpsGate`: `INFERENCE_FPS` (8) con gente en escena, `IDLE_FPS` (2) vacia. El robo dura 1-3 s: no bajar de ~8 fps.
+`FpsGate`: `INFERENCE_FPS` (8) con gente en escena, `IDLE_FPS` (2) vacia. El robo dura 1-3 s: no bajar de ~8 fps. ByteTrack conserva los tracks perdidos `TRACK_BUFFER_FRAMES` (60 por defecto, ~7,5 s a 8 fps) usando un YAML generado en `data/trackers/`; no se modifica el YAML de Ultralytics.
+
+`WristMotionTracker` usa Lucas-Kanade con un parche local de puntos y validacion
+forward-backward para prolongar una muneca conocida si la pose desaparece por una
+oclusion breve. Solo sigue manos con alcance ya observado y dentro del horizonte activo;
+si la muneca fluida permanece en estanteria, extiende `reach_last`. No crea una deteccion,
+no inicia un alcance, no afirma que se tomo un producto y no suma puntuacion. El overlay
+marca el punto con `flujo mano`, distinto de la muneca roja detectada por pose. Si la
+textura, la consistencia o la duracion del flujo no alcanzan los limites, descarta la
+posicion y espera a la siguiente pose real. No recupera el ID si ByteTrack asigna otro.
 
 ## `TrackState` (heuristics.py) - estado por persona
 
@@ -71,8 +160,9 @@ Niveles: `ok < observacion < posible_ocultamiento < probable_sustraccion`. Solo 
 Sobre los ocultamientos **activos** (no anulados):
 1. Sin ocultamientos: `observacion` si `local_state == observacion`, si no `ok`.
 2. Dictamen de Gemini `ocultamiento` con confianza >= `MIN_CONF_CONFIRM` y `verdict_event` entre los activos: `posible_ocultamiento`, o `probable_sustraccion` si ya salio.
-3. Revision pendiente: se mantiene el nivel (minimo `observacion` "Verificando"), sin escalar a ciegas.
-4. Respaldo local (Gemini apagado/fallo/indeterminado): `probable` si salio, no paso por caja y score >= `LOCAL_PROBABLE_SCORE` (0.90); `posible` si score >= `LOCAL_POSSIBLE_SCORE` (0.70); si no `observacion`.
+3. Respaldo local incluso con revision pendiente: `probable` si salio, no paso por caja y score >= `LOCAL_PROBABLE_SCORE` (0.90); `posible` si score >= `LOCAL_POSSIBLE_SCORE` (0.70).
+4. Aviso preventivo: una sola secuencia sostenida de alcance y mano hacia bolsillo, pecho o cintura que no se devolvio en 3 s produce `posible` si score >= 0.50. Una muneca perdida sin posicion de ocultamiento no basta.
+5. Si no se cumple lo anterior, `observacion` mientras se revisa o ante un ocultamiento sin confirmar. Un dictamen posterior que descarte el evento resuelve la alerta preventiva.
 
 `apply_verdict(ts, event, verdict, now, s)`: guarda el dictamen; si es `normal` con confianza >= `MIN_CONF_CLEAR`, `clear_through(ts, event)` anula ese evento y los anteriores.
 
@@ -91,7 +181,7 @@ Emite al **escalar de nivel**, o ante un nuevo ocultamiento si pasaron `ALERT_RE
 ## Configuracion y datos
 
 - `Settings.from_env()` valida rangos y reporta todos los errores juntos. Variables: ver `.env.example` (fuente de verdad) y README.
-- Camaras: `data/cameras.json`. Las contrasenas van al llavero del sistema (`credentials.py`, paquete `keyring`, servicio `tukuru`, usuario `camara:<id>`) y el archivo queda con `password: ""`; sin llavero quedan en el archivo (chmod 600). `CREDENTIALS_STORE=auto|keyring|file`. Un archivo antiguo en texto plano se migra al cargar. Se siembran desde `CAMERA_n_*` del `.env` solo si el archivo no existe. Cada camara lleva `zones`.
+- Camaras: `data/cameras.json`. Las contrasenas van al llavero del sistema (`credentials.py`, paquete `keyring`, servicio `tukuru`, usuario `camara:<id>`) y el archivo queda con `password: ""`; sin llavero quedan en el archivo (chmod 600). `CREDENTIALS_STORE=auto|keyring|file`. Un archivo antiguo en texto plano se migra al cargar. Se siembran desde `CAMERA_n_*` del `.env` solo si el archivo no existe. Cada camara lleva `zones` y puede sobrescribir `yolo_conf` (0.05-0.95) y `min_person_height` (proporcion 0.01-0.50). Si quedan vacios, heredan la confianza global y el filtro de altura actual (10%). Son filtros de personas, no un detector de cabezas; reducirlos puede recuperar detecciones pequeñas y aumentar falsos positivos. Guardar la camara reinicia su pipeline y sus IDs activos.
 - Zonas: `{"estanteria": [poligono,...], "caja": [...], "salida": [...], "personal": [...]}`; cada poligono 3-16 puntos `[x, y]` normalizados; hasta 8 por tipo. `estanteria` se mide con **munecas**; `caja`, `salida`, `personal` con los **pies** (centro inferior del bbox).
 
 ## API web (`web.py`)

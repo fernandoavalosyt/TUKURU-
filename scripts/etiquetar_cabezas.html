@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="es">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Etiquetado local de cabezas · Tukuru</title>
+<style>
+:root{color-scheme:dark;font:15px/1.5 system-ui,sans-serif;background:#0d1117;color:#e6edf3}*{box-sizing:border-box}body{max-width:1100px;margin:0 auto;padding:20px}h1{font-size:22px}p,.muted{color:#9da7b3}.panel{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:16px;margin:14px 0}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}label{display:grid;gap:5px;color:#c9d1d9}input,button{font:inherit;border-radius:6px;border:1px solid #30363d;padding:8px 10px;background:#0d1117;color:#e6edf3}button{cursor:pointer;background:#1c2330}button.primary{background:#2563c0;border-color:#2563c0}button:disabled{opacity:.45;cursor:not-allowed}canvas{display:block;max-width:100%;margin:12px auto;background:#050505;touch-action:none;cursor:crosshair}#message{min-height:1.5em;color:#8b949e}.warn{color:#f0b74a}.counts{font-variant-numeric:tabular-nums}
+</style>
+<body>
+<h1>Etiquetado local de cabezas</h1>
+<p>Esta pagina trabaja en tu navegador. Las imagenes no salen de esta computadora. Dibuja una caja alrededor de cada cabeza visible; en cuadros sin cabezas pulsa “Marcar sin cabeza”.</p>
+<section class="panel">
+  <div class="row">
+    <label>Sesion independiente<input id="session" maxlength="80" placeholder="CAM01-turno-2026-11-05"></label>
+    <label>Cuadros de esa sesion<input id="files" type="file" accept="image/jpeg,image/png" multiple></label>
+  </div>
+  <p class="muted">Carga juntas las imagenes de una sola grabacion. No mezcles videos ni turnos; el ID se usara para separar entrenamiento y evaluacion.</p>
+</section>
+<section class="panel">
+  <div class="row">
+    <button id="prev" type="button" disabled>Anterior</button>
+    <button id="next" type="button" disabled>Siguiente</button>
+    <span id="position" class="counts">Sin cuadros</span>
+    <span id="state" class="muted"></span>
+  </div>
+  <canvas id="canvas" hidden></canvas>
+  <div class="row">
+    <button id="undo" type="button" disabled>Deshacer caja</button>
+    <button id="clear" type="button" disabled>Quitar cajas de este cuadro</button>
+    <button id="negative" type="button" disabled>Marcar sin cabeza</button>
+    <button id="reviewed" class="primary" type="button" disabled>Guardar cuadro revisado</button>
+  </div>
+</section>
+<section class="panel">
+  <div class="row">
+    <span id="counts" class="counts">0 cuadros revisados</span>
+    <button id="export" class="primary" type="button" disabled>Exportar etiquetas JSON</button>
+  </div>
+  <p id="message" role="status"></p>
+  <p class="warn">Marca como revisado cada cuadro exportable. Un cuadro marcado sin cabeza se conserva como ejemplo negativo.</p>
+</section>
+<script>
+const $=id=>document.getElementById(id), canvas=$("canvas"), ctx=canvas.getContext("2d");
+let files=[], index=0, image=null, drag=null, currentBoxes=[], items=new Map(), objectUrl="";
+const keyFor=f=>`${f.name}|${f.size}|${f.lastModified}`;
+const storageKey=()=>`tukuru.head-labels.${$("session").value.trim()}`;
+function persist(){if(!$("session").value.trim())return;try{localStorage.setItem(storageKey(),JSON.stringify([...items.entries()]));}catch{}}
+function loadSaved(){items=new Map();try{const x=JSON.parse(localStorage.getItem(storageKey())||"[]");items=new Map(x);}catch{} }
+function item(){return files[index]?items.get(keyFor(files[index]))||{boxes:[],reviewed:false}:null}
+function setMessage(text,warning=false){$("message").textContent=text;$("message").className=warning?"warn":"muted"}
+function normalizePoint(e){const r=canvas.getBoundingClientRect();return [Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)),Math.max(0,Math.min(1,(e.clientY-r.top)/r.height))]}
+function render(){
+  if(!files.length){canvas.hidden=true;$("position").textContent="Sin cuadros";return}
+  const current=item();canvas.hidden=false;canvas.width=Math.round(image.naturalWidth*Math.min(1000/image.naturalWidth,640/image.naturalHeight,1));canvas.height=Math.round(image.naturalHeight*canvas.width/image.naturalWidth);
+  ctx.clearRect(0,0,canvas.width,canvas.height);ctx.drawImage(image,0,0,canvas.width,canvas.height);
+  for(const b of current.boxes){const x=b[0]*canvas.width,y=b[1]*canvas.height,w=(b[2]-b[0])*canvas.width,h=(b[3]-b[1])*canvas.height;ctx.strokeStyle="#53d769";ctx.lineWidth=Math.max(2,canvas.width/500);ctx.strokeRect(x,y,w,h);ctx.fillStyle="#53d769";ctx.font=`${Math.max(14,canvas.width/55)}px system-ui`;ctx.fillText("cabeza",x+3,Math.max(16,y-5));}
+  if(drag){const x=Math.min(drag[0][0],drag[1][0])*canvas.width,y=Math.min(drag[0][1],drag[1][1])*canvas.height,w=Math.abs(drag[0][0]-drag[1][0])*canvas.width,h=Math.abs(drag[0][1]-drag[1][1])*canvas.height;ctx.strokeStyle="#58a6ff";ctx.lineWidth=2;ctx.strokeRect(x,y,w,h)}
+  $("position").textContent=`Cuadro ${index+1} de ${files.length} · ${files[index].name}`;
+  $("state").textContent=current.reviewed?`Revisado · ${current.boxes.length} cabeza(s)`:"Pendiente de revisar";
+  for(const id of ["prev","next","undo","clear","negative","reviewed"])$(id).disabled=false;
+  $("prev").disabled=index===0;$("next").disabled=index===files.length-1;$("undo").disabled=!current.boxes.length;
+  const reviewed=[...items.values()].filter(x=>x.reviewed).length;$("counts").textContent=`${reviewed} de ${files.length} cuadros revisados`;
+  $("export").disabled=reviewed===0;persist();
+}
+function show(i){index=i;drag=null;if(objectUrl)URL.revokeObjectURL(objectUrl);image=new Image();objectUrl=URL.createObjectURL(files[index]);image.onload=render;image.src=objectUrl;}
+$("files").onchange=()=>{files=[...$("files").files].filter(f=>/^image\/(jpeg|png)$/.test(f.type));index=0;loadSaved();setMessage(files.length?"Dibuja cajas ajustadas a la cabeza, sin incluir el cuerpo entero.":"No se eligieron imagenes compatibles.");if(files.length)show(0)};
+$("session").onchange=()=>{loadSaved();if(files.length)render()};
+canvas.addEventListener("pointerdown",e=>{if(!files.length)return;canvas.setPointerCapture(e.pointerId);drag=[normalizePoint(e),normalizePoint(e)]});
+canvas.addEventListener("pointermove",e=>{if(drag){drag[1]=normalizePoint(e);render()}});
+canvas.addEventListener("pointerup",e=>{if(!drag)return;drag[1]=normalizePoint(e);const b=[Math.min(drag[0][0],drag[1][0]),Math.min(drag[0][1],drag[1][1]),Math.max(drag[0][0],drag[1][0]),Math.max(drag[0][1],drag[1][1])];drag=null;if(b[2]-b[0]>.008&&b[3]-b[1]>.008){const cur=item();cur.boxes.push(b);cur.reviewed=true;items.set(keyFor(files[index]),cur)}render()});
+$("prev").onclick=()=>show(index-1);$("next").onclick=()=>show(index+1);
+$("undo").onclick=()=>{const x=item();x.boxes.pop();items.set(keyFor(files[index]),x);render()};
+$("clear").onclick=()=>{const x=item();x.boxes=[];x.reviewed=false;items.set(keyFor(files[index]),x);render()};
+$("negative").onclick=()=>{items.set(keyFor(files[index]),{boxes:[],reviewed:true});render()};
+$("reviewed").onclick=()=>{const x=item();x.reviewed=true;items.set(keyFor(files[index]),x);render()};
+$("export").onclick=()=>{
+  const session=$("session").value.trim();if(!/^[A-Za-z0-9_.-]{1,80}$/.test(session)){setMessage("Escribe un ID de sesion valido.",true);return}
+  const annotations=[];for(const f of files){const x=items.get(keyFor(f));if(!x?.reviewed)continue;annotations.push({filename:f.name,width:0,height:0,boxes:x.boxes})}
+  let pending=annotations.length;
+  if(!pending){setMessage("No hay cuadros revisados para exportar.",true);return}
+  annotations.forEach(a=>{const f=files.find(q=>q.name===a.filename);const img=new Image();const url=URL.createObjectURL(f);img.onload=()=>{a.width=img.naturalWidth;a.height=img.naturalHeight;URL.revokeObjectURL(url);if(!--pending)download()};img.onerror=()=>{URL.revokeObjectURL(url);if(!--pending)download()};img.src=url});
+  function download(){const blob=new Blob([JSON.stringify({session_id:session,images:annotations},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`${session}_labels.json`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);setMessage(`Exportadas ${annotations.length} anotaciones localmente.`)}
+};
+document.addEventListener("keydown",e=>{if(e.target.matches("input"))return;if(e.key==="ArrowRight"&&index<files.length-1)show(index+1);if(e.key==="ArrowLeft"&&index>0)show(index-1)});
+</script>
+</body>
+</html>

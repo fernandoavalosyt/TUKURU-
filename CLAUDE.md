@@ -6,7 +6,7 @@ Lee esto primero. Detalle en `docs/` (ver "Documentos"). El idioma del proyecto 
 
 Sistema de vision artificial que detecta **robo hormiga** en una tienda de abarrotes (cliente toma un producto del estante, lo oculta en bolsillo/ropa/bolso y sale sin pagar) y emite una alerta con foto de evidencia para que una **persona** la revise. No acusa: señala comportamiento sospechoso.
 
-- Una sola app Python, CPU, sin base de datos ni contenedores. 2 camaras, ampliable a 3 (`MAX_CAMERAS`, tope 4).
+- Una sola app Python, SQLite local para incidentes y sin contenedores. CPU por defecto; CUDA opcional cuando PyTorch la detecta. 2 camaras, ampliable a 3 (`MAX_CAMERAS`, tope 4).
 - Origen: se construyo a partir de **Vigilia** (deteccion de somnolencia en guardias). Todo el concepto de somnolencia fue reemplazado; no queda codigo de ojos/bostezos/postura de sueno. Si ves referencias a "vigilia" o "guardia", son restos y se pueden corregir.
 - Funciona asi: YOLO-pose (persona + 17 puntos + ID) -> heuristica local por mano (alcance -> ocultamiento -> salida) -> **Gemini revisa un clip** solo ante un posible ocultamiento -> decision -> alerta -> panel web.
 
@@ -50,12 +50,16 @@ python -m tukuru.replay ... --gemini --save-clips CARPETA    # revision REAL con
 | `credentials.py` | Contrasenas de camaras en el llavero del sistema (`keyring`, opcional) |
 | `zones.py` | `ZoneSet`: poligonos normalizados 0-1 por tipo (`estanteria`, `caja`, `salida`, `personal`) |
 | `camera.py`, `optimizer.py` | Captura RTSP/HTTP con reconexion; reduce a <=640 px, limita fps, modo nocturno |
-| `vision.py` | `PoseTracker` (YOLO-pose + ByteTrack). Indices COCO de munecas/caderas |
+| `vision.py` | `PoseTracker` (YOLO-pose + ByteTrack). Indices COCO de munecas/caderas; tracker configurable |
+| `motion.py` | Flujo optico con validacion para prolongar brevemente una muneca ya detectada |
 | `heuristics.py` | **Nucleo**: `TrackState`, `update_track`, secuencia por mano, puntuacion con decaimiento |
 | `decision.py` | `decide()` (niveles), `apply_verdict()` (aplica dictamen de Gemini) |
 | `gemini.py` | `GeminiJudge`: prompt, esquema `Verdict`, cooldown, tope por hora, reintentos |
+| `zone_suggestions.py` | Propuesta de zonas con una captura enviada a Gemini por accion del operador |
 | `clips.py` | `store_crop` / `select_clip`: recortes por persona y clip que se envia a Gemini |
-| `alerts.py` | `AlertManager`: deduplicacion, evidencia, JSONL, webhook, modo sombra |
+| `alerts.py` | `AlertManager`: deduplicacion, evidencia, JSONL/SQLite, revision humana, alertas resueltas, webhook, modo sombra |
+| `ml/` | Caracteristicas versionadas, incidentes SQLite, exportacion, entrenamiento local y puntuacion en sombra |
+| `telegram.py` | Avisos y botones de revision en un chat autorizado, opcion configurable |
 | `pipeline.py` | Hilo por camara que orquesta todo |
 | `render.py`, `dashboard.py` | Overlay del video en vivo y en replay (zonas, estado por mano, secuencia alcance>oculta>caja>salida) / panel dibujado en OpenCV (solo replay) |
 | `replay.py` | Reproduccion de video con la heuristica (+ Gemini opcional) |
@@ -81,6 +85,14 @@ Flujo y estructuras en `docs/ARQUITECTURA.md`.
 5. No hagas commit ni push sin que el usuario lo pida. El repositorio git es nuevo y casi vacio a proposito (se borro el historial de Vigilia).
 
 ## Trampas conocidas
+
+- Telegram es opcional: requiere token, chat e IDs de operadores en `.env`. `scripts/telegram_ids.py` obtiene los IDs sin imprimir secretos; detener Tukuru antes porque el bot usa `getUpdates`. Las respuestas se guardan en SQLite/JSONL; reconocer o eliminar una alerta no es una etiqueta. Configurarlo envia fotos de evidencia a Telegram cuando haya una alerta de persona.
+- ML inicial: `python -m tukuru.ml.dataset` exporta revisiones; `pip install -r requirements-ml.txt` y `python -m tukuru.ml.train` crean un candidato solo con suficientes sesiones independientes. `ML_SHADOW_MODEL` muestra una puntuacion experimental sin alterar `decide()` ni alertas. No llamar "mejora" al resultado de un video repetido o a un modelo que solo ve alertas.
+- El panel habilita audio tras la primera interaccion del navegador; el boton permite silenciarlo y la preferencia se guarda localmente. Una secuencia anulada se muestra como resuelta, no como falsa alarma etiquetada para ML.
+- El panel puede activar/desactivar Gemini sin reiniciar. Guarda solo `enabled` en `data/gemini_state.json`, que prevalece sobre `GEMINI_ENABLED` al arrancar. Las consultas ya enviadas pueden terminar pero su dictamen se ignora tras apagar. `Sugerir zonas con Gemini` envia una sola captura solo por pulsacion y requiere revision antes de guardar.
+- `TRACK_BUFFER_FRAMES` genera un YAML de ByteTrack privado en `data/trackers/`; el valor por defecto es 60 (~7.5 s a 8 fps). Esto retiene el ID durante oclusiones; no detecta una mano nueva cuando el modelo no produce caja de persona. `WristMotionTracker` solo prolonga por flujo optico una muneca detectada antes del alcance.
+- `WristMotionTracker` prolonga por flujo optico una muneca ya detectada durante un alcance; solo extiende `reach_last` si sigue en estanteria. El punto fluido se dibuja como `flujo mano`; nunca crea por si solo alcance, ocultamiento, puntuacion ni afirmacion de producto. Requiere textura y continuidad; no inicia un seguimiento desde una cabeza/mano que nunca detecto YOLO-pose ni une IDs distintos.
+- `Dibujar zonas con mouse` usa `GET /api/cameras/<id>/zone-frame` y no envia la imagen a Gemini. El SVG permite crear rectangulos y mover poligonos o puntos; el cambio solo se aplica al guardar la camara.
 
 - Entorno de desarrollo (Windows, Git Bash): las descargas de modelos desde GitHub se colgaron; solo existe `models/yolov8n-pose.pt`. No asumas que puedes bajar otros pesos.
 - En Bash, un heredoc con comillas triples `'''` puede romper el comando: escribe un script a un archivo y ejecutalo.

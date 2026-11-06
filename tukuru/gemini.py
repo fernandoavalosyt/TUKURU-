@@ -21,7 +21,11 @@ from .config import Settings
 
 logger = logging.getLogger("tukuru.gemini")
 
-SERVER_RETRIES = 2
+SERVER_RETRIES = 3
+
+
+class _DisabledDuringReview(Exception):
+    """Una consulta en cola ya no debe salir hacia Gemini."""
 
 SYSTEM_PROMPT = """Eres un analista de prevencion de perdidas de una tienda de abarrotes. Recibes una secuencia cronologica de recortes de UNA persona tomados por una camara, y un resumen numerico de sensores locales que ya detectaron: la mano llego al estante y despues se quedo junto al cuerpo.
 Decide si la persona OCULTO un producto de la tienda (bolsillo, bajo la ropa, bolso o mochila propios) o si la conducta es NORMAL.
@@ -59,6 +63,7 @@ class GeminiJudge:
         self._last_request: Dict[str, float] = {}
         self._call_times: Deque[float] = deque()
         self._executor: Optional[ThreadPoolExecutor] = None
+        self._generation = 0
         self.stats = {"calls": 0, "ocultamiento": 0, "normal": 0, "indeterminado": 0,
                       "errors": 0, "tokens": 0, "skipped_budget": 0}
         self.last_error: Optional[str] = None
@@ -69,13 +74,7 @@ class GeminiJudge:
             self.disabled_reason = "falta GEMINI_API_KEY"
         else:
             try:
-                from google import genai
-                from google.genai import errors, types
-
-                self._client = genai.Client(api_key=settings.gemini_api_key,
-                                            http_options=types.HttpOptions(timeout=int(settings.gemini_timeout * 1000)))
-                self._types, self._errors_mod = types, errors
-                self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="gemini")
+                self._create_client()
             except ImportError:
                 self.disabled_reason = "paquete google-genai no instalado"
             except Exception as exc:  # noqa: BLE001
@@ -90,6 +89,41 @@ class GeminiJudge:
     @property
     def available(self) -> bool:
         return self.disabled_reason is None and time.time() >= self._paused_until
+
+    def _create_client(self) -> None:
+        from google import genai
+        from google.genai import errors, types
+
+        self._client = genai.Client(api_key=self.s.gemini_api_key,
+                                    http_options=types.HttpOptions(timeout=int(self.s.gemini_timeout * 1000)))
+        self._types, self._errors_mod = types, errors
+        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="gemini")
+
+    def set_enabled(self, enabled: bool) -> None:
+        """Cambia la admision de nuevas consultas sin reiniciar las camaras."""
+        if not enabled:
+            with self._lock:
+                if self.disabled_reason == "desactivado desde el panel":
+                    return
+                self.disabled_reason = "desactivado desde el panel"
+                self._generation += 1
+            logger.info("Gemini desactivado desde el panel")
+            return
+        if not self.s.gemini_api_key:
+            raise ValueError("Falta GEMINI_API_KEY en .env")
+        with self._lock:
+            if self.disabled_reason is None:
+                return
+            if self._executor is None:
+                try:
+                    self._create_client()
+                except ImportError as exc:
+                    raise ValueError("Falta el paquete google-genai") from exc
+                except Exception as exc:  # noqa: BLE001
+                    raise ValueError(f"No se pudo crear el cliente Gemini ({exc.__class__.__name__})") from exc
+            self.disabled_reason = None
+            self._generation += 1
+        logger.info("Gemini activado desde el panel | modelo=%s", self.s.gemini_model)
 
     def can_review(self, key: str, now: float) -> bool:
         if not self.available:
@@ -110,11 +144,14 @@ class GeminiJudge:
                 self.stats["skipped_budget"] += 1
             return False
         with self._lock:
+            if self.disabled_reason is not None or self._executor is None:
+                return False
+            generation = self._generation
             self._pending.add(key)
             self._last_request[key] = now
             self._call_times.append(now)
         try:
-            self._executor.submit(self._run, key, frames, context, callback)
+            self._executor.submit(self._run, key, frames, context, callback, generation)
         except RuntimeError:
             with self._lock:
                 self._pending.discard(key)
@@ -132,7 +169,17 @@ class GeminiJudge:
 
     # ------------------------------------------------------------------
     def _run(self, key: str, frames: List[Tuple[float, bytes]], context: Dict[str, Any],
-             callback: VerdictCallback) -> None:
+             callback: VerdictCallback, generation: int) -> None:
+        with self._lock:
+            cancelled = generation != self._generation or self.disabled_reason is not None
+            if cancelled:
+                self._pending.discard(key)
+        if cancelled:
+            try:
+                callback(key, None, "gemini_desactivado")
+            except Exception:  # noqa: BLE001
+                logger.exception("Callback de Gemini fallo")
+            return
         types = self._types
         started = time.time()
         verdict: Optional[Dict[str, Any]] = None
@@ -153,6 +200,8 @@ class GeminiJudge:
             if self.s.gemini_thinking_level:
                 config["thinking_config"] = types.ThinkingConfig(thinking_level=self.s.gemini_thinking_level)
             for attempt in range(SERVER_RETRIES + 1):
+                if generation != self._generation or self.disabled_reason is not None:
+                    raise _DisabledDuringReview()
                 try:
                     response = self._client.models.generate_content(
                         model=self.s.gemini_model, contents=parts, config=types.GenerateContentConfig(**config))
@@ -161,12 +210,14 @@ class GeminiJudge:
                     if attempt == SERVER_RETRIES:
                         raise
                     logger.info("Gemini %s: %s, reintento %d/%d", key, exc.code, attempt + 1, SERVER_RETRIES)
-                    time.sleep(2.0 * (attempt + 1))
+                    time.sleep(5.0 * (attempt + 1))
             parsed = response.parsed
             verdict = (parsed if isinstance(parsed, Verdict)
                        else Verdict.model_validate_json(response.text or "")).model_dump()
             usage = getattr(response, "usage_metadata", None)
             tokens = int(getattr(usage, "total_token_count", 0) or 0)
+        except _DisabledDuringReview:
+            error = "gemini_desactivado"
         except self._errors_mod.ClientError as exc:
             error = self._client_error(exc)
         except self._errors_mod.ServerError as exc:
@@ -177,11 +228,12 @@ class GeminiJudge:
         latency = (time.time() - started) * 1000
         with self._lock:
             self._pending.discard(key)
+            stale = generation != self._generation or self.disabled_reason is not None
             if verdict is not None:
                 self.stats["calls"] += 1
                 self.stats[verdict["state"]] += 1
                 self.stats["tokens"] += tokens
-            else:
+            elif error != "gemini_desactivado":
                 self.stats["errors"] += 1
                 self.last_error = error
         if verdict is not None:
@@ -190,7 +242,7 @@ class GeminiJudge:
         else:
             logger.warning("Gemini %s fallo (%s, %.0f ms); se conserva la heuristica local", key, error, latency)
         try:
-            callback(key, verdict, error)
+            callback(key, None if stale else verdict, "gemini_desactivado" if stale else error)
         except Exception:  # noqa: BLE001
             logger.exception("Callback de Gemini fallo")
 

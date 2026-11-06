@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hmac
 import logging
+import re
 import time
 from pathlib import Path
 
@@ -13,6 +14,9 @@ from . import __version__
 from .app import Tukuru
 from .camera import test_connection
 from .config import validate_camera
+from .ml.dataset import labeled_rows
+from .ml.novelty import novelty_percentiles
+from .zone_suggestions import DEFAULT_ZONE_MODEL
 
 logger = logging.getLogger("tukuru.web")
 STATIC = Path(__file__).parent / "static"
@@ -56,6 +60,16 @@ def create_web(app_core: Tukuru) -> Flask:
     def status():
         return jsonify(app_core.status())
 
+    @web.post("/api/gemini")
+    def set_gemini():
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or type(payload.get("enabled")) is not bool:
+            return jsonify(error="enabled debe ser true o false"), 400
+        try:
+            return jsonify(app_core.set_gemini_enabled(payload["enabled"]))
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+
     # ---- video ------------------------------------------------------------
     @web.get("/stream/<cam_id>")
     def stream(cam_id: str):
@@ -85,6 +99,60 @@ def create_web(app_core: Tukuru) -> Flask:
     def ack(alert_id: str):
         return (jsonify(ok=True) if app_core.alerts.ack(alert_id) else (jsonify(error="no existe"), 404))
 
+    @web.post("/api/alerts/<alert_id>/review")
+    def review_alert(alert_id: str):
+        payload = request.get_json(silent=True) or {}
+        label = payload.get("label") if isinstance(payload, dict) else None
+        if label not in ("confirmado", "descartado", "no_concluyente"):
+            return jsonify(error="revision invalida"), 400
+        reviewer = s.web_user or "operador_local"
+        return (jsonify(ok=True) if app_core.alerts.review(alert_id, label, reviewer, "panel")
+                else (jsonify(error="alerta no disponible"), 404))
+
+    @web.post("/api/reviews/batch")
+    def review_batch():
+        payload = request.get_json(silent=True) or {}
+        ids, label = payload.get("ids"), payload.get("label")
+        if (not isinstance(ids, list) or not ids or len(ids) > 100 or
+                any(not isinstance(item, str) for item in ids) or
+                label not in ("confirmado", "descartado", "no_concluyente")):
+            return jsonify(error="ids (1-100) y label de revision son requeridos"), 400
+        reviewer = s.web_user or "operador_local"
+        saved = sum(app_core.alerts.review(item, label, reviewer, "panel_lote") for item in set(ids))
+        return jsonify(ok=saved == len(set(ids)), saved=saved, requested=len(set(ids)))
+
+    @web.get("/api/reviews/queue")
+    def review_queue():
+        limit = max(1, min(request.args.get("limit", 100, type=int), 200))
+        since = time.time() - s.alert_retention_days * 86400
+        cases = app_core.alerts.incidents.review_candidates(limit, since)
+        try:
+            references = labeled_rows(app_core.alerts.incidents.path)
+            novelty = novelty_percentiles(cases, references)
+        except Exception:  # noqa: BLE001 - la prioridad experimental no debe afectar la cola
+            logger.exception("No se pudo calcular la prioridad exploratoria de novedad")
+            novelty = {}
+        for case in cases:
+            case["evidence_url"] = f"/evidence/{case['snapshot']}" if case.get("snapshot") else None
+            case["novelty_percentile"] = novelty.get(case["id"])
+            case.pop("features", None)
+        cases.sort(key=lambda case: (case["shadow_score"] is None,
+            abs((case["shadow_score"] or 0.0)-0.5) if case["shadow_score"] is not None else 1.0,
+            -(case["novelty_percentile"] or 0.0), -case["time"]))
+        return jsonify(cases)
+
+    @web.post("/api/recordings/assign")
+    def assign_recording():
+        payload = request.get_json(silent=True) or {}
+        ids, recording_id = payload.get("ids"), payload.get("recording_id")
+        if (not isinstance(ids, list) or not ids or len(ids) > 100 or
+                any(not isinstance(item, str) for item in ids) or
+                not isinstance(recording_id, str) or
+                not re.fullmatch(r"[A-Za-z0-9_.:-]{1,80}", recording_id)):
+            return jsonify(error="seleccione de 1 a 100 incidentes e indique un ID de origen valido"), 400
+        updated = app_core.alerts.incidents.assign_recording(ids, recording_id)
+        return jsonify(ok=True, updated=updated)
+
     @web.delete("/api/alerts/<alert_id>")
     def alert_dismiss(alert_id: str):
         return (jsonify(ok=True) if app_core.alerts.dismiss(alert_id) else (jsonify(error="no existe"), 404))
@@ -105,6 +173,29 @@ def create_web(app_core: Tukuru) -> Flask:
     def cameras():
         return jsonify([{**c.public(), "password_in": app_core.store.where_password(c.id)}
                         for c in app_core.store.list()])
+
+    @web.get("/api/cameras/<cam_id>/zone-frame")
+    def camera_zone_frame(cam_id: str):
+        try:
+            return jsonify(app_core.camera_zone_frame(cam_id))
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+
+    @web.post("/api/cameras/<cam_id>/suggest-zones")
+    def suggest_camera_zones(cam_id: str):
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify(error="Solicitud invalida"), 400
+        model = payload.get("model") or DEFAULT_ZONE_MODEL
+        if not isinstance(model, str) or model not in (DEFAULT_ZONE_MODEL, s.gemini_model):
+            return jsonify(error="Modelo de zonas no permitido"), 400
+        try:
+            return jsonify(app_core.suggest_camera_zones(cam_id, model))
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        except Exception as exc:  # noqa: BLE001 - errores de SDK pueden incluir datos de solicitud
+            logger.warning("No se pudieron sugerir zonas para %s (%s)", cam_id, type(exc).__name__)
+            return jsonify(error=f"Gemini {model}: fallo inesperado ({type(exc).__name__}); revise el registro"), 502
 
     def _parse(payload):
         if not isinstance(payload, dict):

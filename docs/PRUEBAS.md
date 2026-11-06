@@ -52,7 +52,25 @@ solo con `video2` ni confundir memorizar ese empaque con generalizar a la tienda
 python -m unittest discover -s tests
 ```
 
-65 pruebas (43 de deteccion, overlay y alertas en `tests/test_tukuru.py`, 10 de camaras/credenciales en `tests/test_camaras.py` con un llavero simulado, 12 del experimento de objetos en `tests/test_objects.py`), sin red ni modelos. Cubren validacion de camaras/zonas/ajustes y escenas sinteticas de puntos del cuerpo (`Scene` en `tests/test_tukuru.py`: persona de pie 640x360, alcance en `REACH`, bolsillo en `POCKET`, zonas `ZONES`). Una prueba por regla: alcance, roce, manos al bolsillo sin alcance, ventana vencida, muneca perdida, mirada lateral, personal, mano por mano, manos juntas, devolucion (mismo sitio / otro sitio / fuera de ventana), caminar, decision con/sin Gemini, pasar por caja, repeticion de alertas.
+106 pruebas de deteccion, camaras, credenciales, objetos, revision por panel/Telegram, anulacion de alertas, resumen de etiquetas, buffer configurable de ByteTrack, continuidad optica sintetica de muñecas, control de Gemini, propuesta de zonas y sus errores, editor visual, SQLite y ML en sombra. No usan red ni pesos de vision. Las pruebas de flujo usan una textura sintetica trasladada y verifican que no se inventen eventos. Las pruebas de Gemini simulan respuestas y nunca envian imagenes. La prueba del entrenador usa sesiones sinteticas y se omite cuando no esta instalado `scikit-learn`. Las pruebas de Telegram no envian fotos ni mensajes reales. La prueba de gestos del editor usa Node si esta disponible; simula dibujar, mover y ajustar un vertice sin abrir un navegador.
+
+Aviso preventivo (5 de noviembre de 2026): en el replay CPU de `video2` a 10 fps y
+sin Gemini se emitio una alerta posible para la mujer, una posible transitoria para el
+hombre que devolvio, y una probable posterior para la mujer. Esto aumenta sensibilidad
+pero confirma riesgo de avisos tempranos que luego se anulan; no es prueba de mejora
+de precision. En alertas reales de CAM-01 a las 09:07 y 09:08 el puntaje fue ~1,02 y
+`salio=true`, pero `paso_por_caja=true`; por eso la regla local dejo el nivel en
+`posible_ocultamiento`. La zona de caja actual atraviesa el pasillo y necesita
+recalibrarse visualmente antes de interpretar `paso_por_caja` como pago.
+
+La continuidad optica se verifica en cuadros sinteticos, no en la camara de la tienda. Revisar un clip real de oclusion antes de confiar en ella; el marcador `flujo mano` indica una posicion optica y no una deteccion nueva de YOLO.
+
+Tras añadir el estado de secuencia anulada, el replay local de `video2` en CPU, a 10 fps
+y sin Gemini leyó 658 cuadros. Conservó los niveles y eventos de referencia del respaldo
+local: ambos tracks llegaron a `probable_sustraccion`; la devolución del hombre apareció
+a 14,9 s. Esta reproducción no prueba la calidad del clasificador ni el sonido en un
+navegador real. El entrenamiento con datos locales aún se detiene por falta de sesiones
+independientes y etiquetas de ambas clases.
 
 ## Videos de prueba (carpeta `video/`)
 

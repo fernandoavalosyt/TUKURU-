@@ -69,7 +69,8 @@ def ensure_model(models_dir: Path, name: str) -> str:
 class PoseTracker:
     """YOLO-pose + ByteTrack. Una instancia por camara (el tracker conserva estado)."""
 
-    def __init__(self, model_path: str, device: str, conf: float, imgsz: int = 640) -> None:
+    def __init__(self, model_path: str, device: str, conf: float, imgsz: int = 640,
+                 tracker_config: str = "bytetrack.yaml") -> None:
         import torch
         from ultralytics import YOLO
 
@@ -80,6 +81,7 @@ class PoseTracker:
             logger.warning("Dispositivo %s no disponible; se usara CPU", device)
         self.conf = conf
         self.imgsz = imgsz
+        self.tracker_config = tracker_config
         self.half = self.device.startswith("cuda")
         self._precision = fp16_arguments() if self.half else {}
         try:
@@ -111,13 +113,13 @@ class PoseTracker:
 
     def infer(self, frame: np.ndarray, imgsz: int) -> List[Person]:
         try:
-            results = self.model.track(frame, persist=True, tracker="bytetrack.yaml", classes=[0], conf=self.conf,
+            results = self.model.track(frame, persist=True, tracker=self.tracker_config, classes=[0], conf=self.conf,
                                        imgsz=imgsz, device=self.device, verbose=False, **self._precision)
         except Exception as exc:
             if not self.half:
                 raise
             self._fallback_cpu(exc)
-            results = self.model.track(frame, persist=True, tracker="bytetrack.yaml", classes=[0], conf=self.conf,
+            results = self.model.track(frame, persist=True, tracker=self.tracker_config, classes=[0], conf=self.conf,
                                        imgsz=imgsz, device=self.device, verbose=False)
         if not results:
             return []
